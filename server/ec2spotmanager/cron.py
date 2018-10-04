@@ -1,12 +1,11 @@
 import datetime
 import json
-
 import redis
 from django.conf import settings
 from django.db.models.query_utils import Q
 from django.utils import timezone
-
 from celeryconf import app
+from .Provider import Provider
 
 
 STATS_DELTA_SECS = 60 * 15  # 30 minutes
@@ -16,7 +15,8 @@ STATS_TOTAL_ACCUMULATED = 30  # How many days should we keep accumulated statist
 
 @app.task
 def update_stats():
-    from .models import PoolUptimeDetailedEntry, PoolUptimeAccumulatedEntry, InstancePool, Instance, INSTANCE_STATE
+    from .models import PoolUptimeDetailedEntry, PoolUptimeAccumulatedEntry, InstancePool, Instance
+    from .CloudProvider.CloudProvider import INSTANCE_STATE
 
     instance_pools = InstancePool.objects.all()
 
@@ -107,6 +107,8 @@ def check_instance_pools():
 
 @app.task
 def update_spot_prices():
+    from .models import PoolConfiguration
+
     """Periodically refresh spot price history and store it in redis to be consumed when spot instances are created.
 
     Prices are stored in redis, with keys like:
@@ -114,26 +116,21 @@ def update_spot_prices():
     and values as JSON objects {region: {az: [prices]}} like:
         '{"us-east-1": {"us-east-1a": [0.08000, ...]}}'
     """
-    from .common.prices import get_spot_prices
-    from .models import PoolConfiguration
 
     regions = set()
     for cfg in PoolConfiguration.objects.all():
-        if cfg.ec2_allowed_regions:
-            regions |= set(json.loads(cfg.ec2_allowed_regions))
+        if cfg.allowed_regions:
+            regions |= set(json.loads(cfg.allowed_regions))
 
-    now = timezone.now()
-    expires = now + datetime.timedelta(hours=3)  # how long this data is valid (if not replaced)
-
-    prices = get_spot_prices(regions,
-                             getattr(settings, 'AWS_ACCESS_KEY_ID', None),
-                             getattr(settings, 'AWS_SECRET_ACCESS_KEY', None))
-
-    # use pipeline() so everything is in 1 transaction
-    cache = redis.StrictRedis(host=settings.REDIS_HOST, port=settings.REDIS_PORT, db=settings.REDIS_DB).pipeline()
-    for instance_type in prices:
-        key = 'ec2spot:price:' + instance_type
-        cache.delete(key)
-        cache.set(key, json.dumps(prices[instance_type], separators=(',', ':')))
-        cache.expireat(key, expires)
-    cache.execute()  # commit to redis
+        now = timezone.now()
+        expires = now + datetime.timedelta(hours=12)  # how long this data is valid (if not replaced)
+        cloud_provider = Provider().getInstance(cfg.provider)
+        prices = cloud_provider.get_spot_prices(regions)
+        # use pipeline() so everything is in 1 transaction
+        cache = redis.StrictRedis(host=settings.REDIS_HOST, port=settings.REDIS_PORT, db=settings.REDIS_DB).pipeline()
+        for instance_type in prices:
+            key = cfg.provider + ':price:' + instance_type
+            cache.delete(key)
+            cache.set(key, json.dumps(prices[instance_type], separators=(',', ':')))
+            cache.expireat(key, expires)
+            cache.execute()  # commit to redis

@@ -17,6 +17,7 @@ from django.contrib.auth.models import User
 from django.db.migrations.executor import MigrationExecutor
 from django.db import connection
 from django.test import TestCase as DjangoTestCase
+from django.conf import settings
 
 from ..models import Instance, InstancePool, PoolConfiguration, PoolStatusEntry
 
@@ -84,7 +85,7 @@ class TestCase(DjangoTestCase):
                         ec2_region="",
                         ec2_zone=""):
         result = Instance.objects.create(pool=pool, hostname=hostname, status_code=status_code, status_data=status_data,
-                                         ec2_instance_id=ec2_instance_id, ec2_region=ec2_region, ec2_zone=ec2_zone)
+                                         instance_id=ec2_instance_id, region=ec2_region, zone=ec2_zone)
         log.debug("Created Instance pk=%d", result.pk)
         return result
 

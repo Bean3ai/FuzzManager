@@ -109,7 +109,7 @@ class CreateConfigViewTests(TestCase):
 
     def test_no_login(self):
         """Request without login hits the login redirect"""
-        path = reverse(self.name)
+        path = reverse(self.name, kwargs={'provider': 'ec2'})
         response = self.client.get(path)
         log.debug(response)
         self.assertRedirects(response, '/login/?next=' + path)
@@ -117,7 +117,7 @@ class CreateConfigViewTests(TestCase):
     def test_create_form(self):
         """Config creation form should be shown"""
         self.client.login(username='test', password='test')
-        response = self.client.get(reverse(self.name))
+        response = self.client.get(reverse(self.name, kwargs={'provider': 'ec2'}))
         log.debug(response)
         self.assertEqual(response.status_code, requests.codes['ok'])
         self.assertContains(response, "Create Configuration")
@@ -128,25 +128,27 @@ class CreateConfigViewTests(TestCase):
     def test_create(self):
         """Config created via form should be added to db"""
         self.client.login(username='test', password='test')
-        response = self.client.post(reverse(self.name), {'parent': '-1',
-                                                         'name': 'config #1',
-                                                         'size': '1',
-                                                         'cycle_interval': '1',  # activate tsmith mode
-                                                         'ec2_key_name': 'key #1',
-                                                         'ec2_security_groups': 'group #1',
-                                                         'ec2_instance_types': 'machine #1',
-                                                         'ec2_image_name': 'ami #1',
-                                                         'ec2_userdata': 'lorem ipsum',
-                                                         'ec2_userdata_macros': 'yup=123,nope=456',
-                                                         'ec2_allowed_regions': 'nowhere',
-                                                         'ec2_max_price': '0.01',
-                                                         'ec2_tags': 'good=true, bad=false',
-                                                         'ec2_raw_config': 'hello=world'})
+        response = self.client.post(reverse(self.name, kwargs={'provider': 'ec2'}),
+                                    {'parent': '-1',
+                                        'name': 'config #1',
+                                        'size': '1',
+                                        'cycle_interval': '1',  # activate tsmith mode
+                                        'ec2_key_name': 'key #1',
+                                        'ec2_security_groups': 'group #1',
+                                        'ec2_instance_types': 'machine #1',
+                                        'ec2_image_name': 'ami #1',
+                                        'ec2_userdata': 'lorem ipsum',
+                                        'ec2_userdata_macros': 'yup=123,nope=456',
+                                        'ec2_allowed_regions': 'nowhere',
+                                        'ec2_max_price': '0.01',
+                                        'ec2_tags': 'good=true, bad=false',
+                                        'ec2_raw_config': 'hello=world'})
         log.debug(response)
         cfg = PoolConfiguration.objects.get(name='config #1')
         self.assertIsNone(cfg.parent)
         self.assertEqual(cfg.size, 1)
         self.assertEqual(cfg.cycle_interval, 1)
+
         self.assertEqual(cfg.ec2_key_name, 'key #1')
         self.assertEqual(json.loads(cfg.ec2_security_groups), ['group #1'])
         self.assertEqual(json.loads(cfg.ec2_instance_types), ['machine #1'])
@@ -174,7 +176,7 @@ class CreateConfigViewTests(TestCase):
                                  ec2_max_price='0.01',
                                  ec2_tags={'good': 'true', 'bad': 'false'},
                                  ec2_raw_config={'hello': 'world'})
-        response = self.client.get(reverse(self.name), {'clone': cfg.pk})
+        response = self.client.get(reverse(self.name, kwargs={'provider': 'ec2'}), {'clone': cfg.pk})
         log.debug(response)
         self.assertEqual(response.status_code, requests.codes['ok'])
         self.assertContains(response, "Clone Configuration")

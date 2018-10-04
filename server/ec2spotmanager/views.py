@@ -1,4 +1,6 @@
+import sys
 import json
+from operator import attrgetter
 from chartjs.colors import next_color
 from chartjs.views.base import JSONView
 from django.conf import settings
@@ -10,20 +12,17 @@ from django.shortcuts import render, redirect, get_object_or_404
 from django.utils.timezone import now, timedelta
 import fasteners
 import redis
-from operator import attrgetter
 from rest_framework import status
 from rest_framework.authentication import SessionAuthentication, TokenAuthentication
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
-
-from .models import InstancePool, PoolConfiguration, Instance, \
-    INSTANCE_STATE_CODE, INSTANCE_STATE, PoolStatusEntry
+from server.views import deny_restricted_users
+from .models import InstancePool, PoolConfiguration, Instance, PoolStatusEntry
 from .models import PoolUptimeDetailedEntry, PoolUptimeAccumulatedEntry
 from .serializers import MachineStatusSerializer
 from .common.ec2 import CORES_PER_INSTANCE
-
-from server.views import deny_restricted_users
+from .CloudProvider.CloudProvider import INSTANCE_STATE, INSTANCE_STATE_CODE
 
 
 def renderError(request, err):
@@ -119,9 +118,9 @@ def viewPoolPrices(request, poolid):
     cache = redis.StrictRedis(host=settings.REDIS_HOST, port=settings.REDIS_PORT, db=settings.REDIS_DB)
 
     pool = get_object_or_404(InstancePool, pk=poolid)
-    config = pool.config.flatten()
-
-    allowed_regions = set(config.ec2_allowed_regions)
+    config = pool.config.provider.flatten()
+    print(config)
+    allowed_regions = set(config.allowed_regions)
     zones = set()
     latest_price_by_zone = {}
 
@@ -288,7 +287,7 @@ def viewConfig(request, configid):
     return render(request, 'config/view.html', {'config': config})
 
 
-def __handleConfigPOST(request, config):
+def __handleEC2SpotConfigPOST(request, config):
     if int(request.POST['parent']) < 0:
         config.parent = None
     else:
@@ -317,16 +316,16 @@ def __handleConfigPOST(request, config):
     else:
         config.ec2_image_name = None
 
-    if request.POST['ec2_max_price']:
-        config.ec2_max_price = float(request.POST['ec2_max_price'])
+    if request.POST['max_price']:
+        config.max_price = float(request.POST['max_price'])
     else:
-        config.ec2_max_price = None
+        config.max_price = None
 
-    if request.POST['ec2_allowed_regions']:
-        config.ec2_allowed_regions_list = [x.strip() for x in request.POST['ec2_allowed_regions'].split(',')]
+    if request.POST['allowed_regions']:
+        config.allowed_regions_list = [x.strip() for x in request.POST['allowed_regions'].split(',')]
     else:
-        config.ec2_allowed_regions_list = None
-    config.ec2_allowed_regions_override = request.POST.get('ec2_allowed_regions_override', 'off') == 'on'
+        config.allowed_regions_list = None
+    config.allowed_regions_override = request.POST.get('allowed_regions_override', 'off') == 'on'
 
     if request.POST['ec2_security_groups']:
         config.ec2_security_groups_list = [x.strip() for x in request.POST['ec2_security_groups'].split(',')]
@@ -340,16 +339,17 @@ def __handleConfigPOST(request, config):
         config.ec2_instance_types_list = None
     config.ec2_instance_types_override = request.POST.get('ec2_instance_types_override', 'off') == 'on'
 
-    if request.POST['ec2_userdata_macros']:
-        config.ec2_userdata_macros_dict = dict(
-            y.split('=', 1) for y in [x.strip() for x in request.POST['ec2_userdata_macros'].split(',')])
+    if request.POST['userdata_macros']:
+        config.userdata_macros_dict = dict(
+            y.split('=', 1) for y in [x.strip() for x in request.POST['userdata_macros'].split(',')])
     else:
-        config.ec2_userdata_macros_dict = None
-    config.ec2_userdata_macros_override = request.POST.get('ec2_userdata_macros_override', 'off') == 'on'
+        config.userdata_macros_dict = None
+    config.userdata_macros_override = request.POST.get('userdata_macros_override', 'off') == 'on'
 
     if request.POST['ec2_tags']:
         config.ec2_tags_dict = dict(y.split('=', 1) for y in [x.strip() for x in request.POST['ec2_tags'].split(',')])
     else:
+
         config.ec2_tags_dict = None
     config.ec2_tags_override = request.POST.get('ec2_tags_override', 'off') == 'on'
 
@@ -360,30 +360,35 @@ def __handleConfigPOST(request, config):
         config.ec2_raw_config_dict = None
     config.ec2_raw_config_override = request.POST.get('ec2_raw_config_override', 'off') == 'on'
 
+    if request.POST['provider']:
+        config.provider = request.POST['provider']
+
     # Ensure we have a primary key before attempting to store files
     config.save()
 
-    if request.POST['ec2_userdata']:
-        if not config.ec2_userdata_file.name:
-            config.ec2_userdata_file.save("default.sh", ContentFile(""))
-        config.ec2_userdata = request.POST['ec2_userdata']
-        if request.POST.get('ec2_userdata_ff', 'unix') == 'unix':
-            config.ec2_userdata = config.ec2_userdata.replace('\r\n', '\n')
+    if request.POST['userdata']:
+        if not config.userdata_file.name:
+            config.userdata_file.save("default.sh", ContentFile(""))
+        config.userdata = request.POST['userdata']
+        if request.POST.get('userdata_ff', 'unix') == 'unix':
+            config.userdata = config.userdata.replace('\r\n', '\n')
         config.storeTestAndSave()
     else:
-        if config.ec2_userdata_file:
+        if config.userdata_file:
             # Forcing test saving with ec2_userdata unset will clean the file
-            config.ec2_userdata = None
+            config.userdata = None
             config.storeTestAndSave()
 
     return redirect('ec2spotmanager:configview', configid=config.pk)
 
 
 @deny_restricted_users
-def createConfig(request):
+def createConfig(request, provider):
     if request.method == 'POST':
         config = PoolConfiguration()
-        return __handleConfigPOST(request, config)
+        cloud_post_method = "__handle" + provider + "ConfigPOST"
+        post_method = getattr(sys.modules[__name__], cloud_post_method)
+        return post_method(request, config)
     elif request.method == 'GET':
         configurations = PoolConfiguration.objects.all()
 
@@ -414,13 +419,15 @@ def editConfig(request, configid):
     config.deserializeFields()
 
     if request.method == 'POST':
-        return __handleConfigPOST(request, config)
+        cloud_post_method = "__handle" + config.provider + "ConfigPOST"
+        post_method = getattr(sys.modules[__name__], cloud_post_method)
+        return post_method(request, config)
     elif request.method == 'GET':
         configurations = PoolConfiguration.objects.all()
         data = {'config': config,
                 'configurations': configurations,
                 'edit': True,
-                'userdata_ff': 'dos' if (b'\r\n' in (config.ec2_userdata or b'')) else 'unix'}
+                'userdata_ff': 'dos' if (b'\r\n' in (config.userdata or b'')) else 'unix'}
         return render(request, 'config/edit.html', data)
     else:
         raise SuspiciousOperation
