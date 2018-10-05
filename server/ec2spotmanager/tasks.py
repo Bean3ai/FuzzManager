@@ -6,7 +6,8 @@ from django.conf import settings
 from django.utils import timezone
 from celeryconf import app
 from .Provider import Provider
-from .CloudProvider.CloudProvider import INSTANCE_STATE
+from laniakea.core.userdata import UserData
+from .CloudProvider.CloudProvider import INSTANCE_STATE, PROVIDERS
 from . import cron  # noqa ensure cron tasks get registered
 
 
@@ -127,20 +128,24 @@ def _start_pool_instances(pool, config, count=1):
     image_names = {}
     images = {}
     cache_entries = {}
-    cloud_provider = Provider().getInstance(config.provider)
-    image_names = cloud_provider.get_image_names(config)
+    cloud_provider = Provider().getInstance(PROVIDERS[0])
+    image_name = cloud_provider.get_image_name(config)
+    allowed_regions = cloud_provider.get_allowed_regions(config)
 
-    for region in image_names.keys():
-        image = cache.get(image_names[region])
+    for region in allowed_regions:
+        image_key = PROVIDERS[0] + ":image:%s:%s" % (region, image_name)
+        image = cache.get(image_key)
         if image is None:
             image = cloud_provider.get_image(region, config)
             cache_entries[region] = image
         if cache_entries:
-            cache.set(image_names[region], cache_entries[region], ex=24 * 3600)
+            cache.set(image_key, image, ex=24 * 3600)
         images[region] = image
 
+    userdata = _setup_userdata(config, pool)
+
     try:
-        requested_instances = cloud_provider.start_instances(pool.id, config, prices,
+        requested_instances = cloud_provider.start_instances(config, prices, userdata,
                                                              blacklisted_zones, images, count)
 
         for requested_instance in requested_instances.keys():
@@ -156,12 +161,28 @@ def _start_pool_instances(pool, config, count=1):
     except Exception as msg:
         _update_pool_status(pool, msg)
 
+def _setup_userdata(config, pool):
+    userdata = config.userdata.decode('utf-8')
+
+    # Copy the userdata_macros and populate with internal variables
+    userdata_macros = dict(config.userdata_macros)
+    userdata_macros["EC2SPOTMANAGER_POOLID"] = str(pool.id)
+    userdata_macros["EC2SPOTMANAGER_CYCLETIME"] = str(config.cycle_interval)
+
+    userdata = UserData.handle_tags(userdata, userdata_macros)
+
+    if not userdata:
+        logger.error("[Pool %d] Failed to compile userdata.", pool.id)
+        raise Exception({"type": "unclassified", "data": "Configuration error: Failed to compile userdata"})
+
+    return userdata
+
 
 def _get_cached_prices(config):
     cache = redis.StrictRedis(host=settings.REDIS_HOST, port=settings.REDIS_PORT,
                               db=settings.REDIS_DB)
     prices = {}
-    cloud_provider = Provider().getInstance(config.provider)
+    cloud_provider = Provider().getInstance(PROVIDERS[0])
     price_data = cloud_provider.get_price_data(config)
     blacklisted_zones = []
     for instance_type in price_data.keys():
@@ -174,7 +195,7 @@ def _get_cached_prices(config):
     for instance_type in prices.keys():
         for region in prices[instance_type]:
             for zone in prices[instance_type][region]:
-                if cache.get(config.provider + ':blacklist:%s:%s' % (zone, instance_type)) is not None:
+                if cache.get(PROVIDERS[0] + ':blacklist:%s:%s' % (zone, instance_type)) is not None:
                     blacklisted_zones.append((zone, instance_type))
 
     return (prices, blacklisted_zones)
@@ -182,7 +203,7 @@ def _get_cached_prices(config):
 
 def _terminate_pool_instances(instance_pool, running_instances, terminateByPool=False):
     """ Terminate an instance with the given configuration """
-    cloud_provider = Provider().getInstance(instance_pool.config.provider)
+    cloud_provider = Provider().getInstance(PROVIDERS[0])
 
     instance_ids = _get_instance_ids_by_region(running_instances)
 
@@ -229,7 +250,7 @@ def _update_pool_instances(pool, config):
     debug_not_in_region = {}
 
     cache = redis.StrictRedis(host=settings.REDIS_HOST, port=settings.REDIS_PORT, db=settings.REDIS_DB)
-    cloud_provider = Provider().getInstance(pool.config.provider)
+    cloud_provider = Provider().getInstance(PROVIDERS[0])
 
     instances = Instance.objects.filter(pool=pool)
     instance_ids_by_region = _get_instance_ids_by_region(instances)

@@ -54,7 +54,7 @@ class EC2SpotCloudProvider(CloudProvider):
                 self.logger.exception("[Pool %d] terminate_pool_instances: boto failure: %s", pool_id, msg)
                 return 1
 
-    def start_instances(self, pool_id, config, price_list, blacklisted_zones, image_ids, count=1):
+    def start_instances(self, config, price_list, userdata, blacklisted_zones, image_ids, count=1):
         images = self._create_laniakea_images(config)
         # Filter machine sizes that would put us over the number of cores required. If all do, then choose the smallest.
         smallest = []
@@ -89,20 +89,10 @@ class EC2SpotCloudProvider(CloudProvider):
         #     -> next time around, we will request 1x 4-core instance
         count = max(1, count // CORES_PER_INSTANCE[instance_type])
         (region, zone, instance_type, rejected) = self._determine_best_price(config, price_list, blacklisted_zones)
-        self.logger.info("[Pool %d] Using instance type %s in region %s with availability zone %s.",
-                         pool_id, instance_type, region, zone)
+        self.logger.info("Using instance type %s in region %s with availability zone %s.",
+                         instance_type, region, zone)
         try:
-            userdata = config.userdata.decode('utf-8')
-
-            # Copy the userdata_macros and populate with internal variables
-            userdata_macros = dict(config.userdata_macros)
-            userdata_macros["EC2SPOTMANAGER_POOLID"] = str(pool_id)
-            userdata_macros["EC2SPOTMANAGER_CYCLETIME"] = str(config.cycle_interval)
-
-            userdata = UserData.handle_tags(userdata, userdata_macros)
-            if not userdata:
-                self.logger.error("[Pool %d] Failed to compile userdata.", pool_id)
-                raise Exception({"type": "unclassified", "data": "Configuration error: Failed to compile userdata"})
+            userdata = userdata.decode('utf-8')
 
             images["default"]['user_data'] = userdata.encode("utf-8")
             images["default"]['placement'] = zone
@@ -120,19 +110,18 @@ class EC2SpotCloudProvider(CloudProvider):
                 images['default'].pop('image_name')
                 cluster.images = images
             except ssl.SSLError as msg:
-                self.logger.warning("[Pool %d] start_pool_instances: Temporary failure in region %s: %s",
-                                    pool_id, region, msg)
+                self.logger.warning("start_pool_instances: Temporary failure in region %s: %s",region, msg)
                 raise Exception({"type": "temporary-failure", "data": "Temporary failure occured: %s" % str(msg)})
 
             except Exception as msg:
-                self.logger.exception("[Pool %d] start_pool_instances: laniakea failure: %s", pool_id, msg)
+                self.logger.exception("start_pool_instances: laniakea failure: %s", msg)
                 raise Exception({"type": "unclassified", "data": str(msg)})
 
             try:
                 instances = {}
-                self.logger.info("[Pool %d] Creating %dx %s instances... (%d cores total)", pool_id, count,
+                self.logger.info("Creating %dx %s instances... (%d cores total)", count,
                                  instance_type, count * CORES_PER_INSTANCE[instance_type])
-                for ec2_request in cluster.create_spot_requests(config.max_price * CORES_PER_INSTANCE[instance_type],
+                for ec2_request in cluster.create_spot_requests(config.ec2_max_price * CORES_PER_INSTANCE[instance_type],
                                                                 delete_on_termination=True,
                                                                 timeout=10 * 60):
                     instances[ec2_request] = {}
@@ -140,26 +129,25 @@ class EC2SpotCloudProvider(CloudProvider):
                     instances[ec2_request]['region'] = region
                     instances[ec2_request]['zone'] = zone
                     instances[ec2_request]['status_code'] = INSTANCE_STATE["requested"]
-                    instances[ec2_request]['pool_id'] = pool_id
                     instances[ec2_request]['size'] = CORES_PER_INSTANCE[instance_type]
 
                 return instances
 
             except (boto.exception.EC2ResponseError, boto.exception.BotoServerError, ssl.SSLError, socket.error) as msg:
                 if "MaxSpotInstanceCountExceeded" in str(msg):
-                    self.logger.warning("[Pool %d] start_pool_instances: Maximum instance count exceeded for region %s",
-                                        pool_id, region)
+                    self.logger.warning("start_pool_instances: Maximum instance count exceeded for region %s",
+                                        region)
                     raise Exception({"type": "max-spot-instance-count-exceeded",
                                      "data": "Auto-selected region exceeded its maximum spot instance count."})
                 elif "Service Unavailable" in str(msg):
-                    self.logger.warning("[Pool %d] start_pool_instances: Temporary failure in region %s: %s",
-                                        pool_id, region, msg)
+                    self.logger.warning("start_pool_instances: Temporary failure in region %s: %s",
+                                        region, msg)
                     raise Exception({"type": "temporary-failure", "data": "Temporary failure occurred: %s" % str(msg)})
                 else:
-                    self.logger.exception("[Pool %d] start_pool_instances: boto failure: %s", pool_id, msg)
+                    self.logger.exception("start_pool_instances: boto failure: %s", msg)
                     raise Exception({"type": "unclassified", "data": "Unclassified error occurred: %s" % str(msg)})
         except Exception as msg:
-            self.logger.exception("[Pool %d] start_pool_instances: unhandled failure: %s", pool_id, msg)
+            self.logger.exception("start_pool_instances: unhandled failure: %s", msg)
             raise Exception({"type": "unclassified", "data": "Unclassified error occurred: %s" % str(msg)})
 
     def check_instances_requests(self, region, pool_id, instances, tags):
@@ -273,13 +261,6 @@ class EC2SpotCloudProvider(CloudProvider):
             price_data[instance_type] = "EC2Spot:price:" + instance_type
         return price_data
 
-    def get_image_names(self, config):
-        image_names = {}
-        for region in config.allowed_regions:
-            image_data = "EC2Spot:ami:%s:%s" % (region, config.ec2_image_name)
-            image_names[region] = image_data
-        return image_names
-
     def get_image(self, region, config):
         images = self._create_laniakea_images(config)
         cluster = EC2Manager(None)
@@ -290,6 +271,23 @@ class EC2SpotCloudProvider(CloudProvider):
             return ami
         except ssl.SSLError as msg:
             raise Exception({'type': 'temporary-failure', 'data': 'Temporary failure occured: %s' % msg})
+
+    @staticmethod
+    def config_supported(config):
+        fields = ['ec2_allowed_regions', 'ec2_max_price', 'ec2_key_name', 'ec2_tags', 'ec2_security_groups',
+                  'ec2_instance_types', 'ec2_raw_config', 'ec2_image_name']
+        if any(key in config for key in fields):
+            return True
+        else:
+            return False
+
+    @staticmethod
+    def get_allowed_regions(config):
+        return config.ec2_allowed_regions
+
+    @staticmethod
+    def get_image_name(config):
+        return config.ec2_image_name
 
     def _get_spot_price_per_region(self, region_name, instance_types=None):
         '''Gets spot prices of the specified region and instance type'''
@@ -351,7 +349,7 @@ class EC2SpotCloudProvider(CloudProvider):
         best_region = None
         best_type = None
         best_median = None
-        allowed_regions = set(config.allowed_regions)
+        allowed_regions = set(config.ec2_allowed_regions)
         for instance_type in prices.keys():
             if instance_type not in config.ec2_instance_types:
                 continue
@@ -364,8 +362,7 @@ class EC2SpotCloudProvider(CloudProvider):
                         continue
                     out_prices = [price / CORES_PER_INSTANCE[instance_type] for
                                   price in prices[instance_type][region][zone]]
-
-                    if out_prices[0] > config.max_price:
+                    if out_prices[0] > config.ec2_max_price:
                         rejected_prices[zone] = min(rejected_prices.get(zone, 9999), out_prices[0])
                         continue
                     median = get_price_median(out_prices)

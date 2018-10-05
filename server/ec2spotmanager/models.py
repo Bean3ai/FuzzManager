@@ -34,8 +34,8 @@ class PoolConfiguration(models.Model):
     name = models.CharField(max_length=255, blank=False)
     size = models.IntegerField(default=1, blank=True, null=True)
     cycle_interval = models.IntegerField(default=86400, blank=True, null=True)
-    max_price = models.DecimalField(max_digits=12, decimal_places=6, blank=True, null=True)
-    allowed_regions = models.CharField(max_length=1023, blank=True, null=True)
+    ec2_max_price = models.DecimalField(max_digits=12, decimal_places=6, blank=True, null=True)
+    ec2_allowed_regions = models.CharField(max_length=1023, blank=True, null=True)
     userdata_file = models.FileField(storage=OverwritingStorage(location=getattr(settings, 'USERDATA_STORAGE', None)),
                                      upload_to=get_storage_path, blank=True, null=True)
     userdata_macros = models.CharField(max_length=4095, blank=True, null=True)
@@ -45,7 +45,7 @@ class PoolConfiguration(models.Model):
     ec2_instance_types = models.CharField(max_length=1023, blank=True, null=True)
     ec2_image_name = models.CharField(max_length=255, blank=True, null=True)
     ec2_raw_config = models.CharField(max_length=4095, blank=True, null=True)
-    provider = models.CharField(max_length=255, blank=True, null=True)
+
 
     def __init__(self, *args, **kwargs):
 
@@ -54,8 +54,8 @@ class PoolConfiguration(models.Model):
         self.userdata_macros_dict = None
         self.userdata_macros_override = None
         self.userdata = None
-        self.allowed_regions_list = None
-        self.allowed_regions_override = None
+        self.ec2_allowed_regions_list = None
+        self.ec2_allowed_regions_override = None
         self.ec2_raw_config_dict = None
         self.ec2_raw_config_override = None
         self.ec2_security_groups_list = None
@@ -66,17 +66,16 @@ class PoolConfiguration(models.Model):
         self.config_fields = [
             'size',
             'cycle_interval',
-            'max_price',
+            'ec2_max_price',
             'userdata',
             'ec2_key_name',
             'ec2_image_name',
-            'provider'
         ]
 
         self.list_config_fields = [
             'ec2_security_groups',
             'ec2_instance_types',
-            'allowed_regions'
+            'ec2_allowed_regions'
         ]
 
         self.dict_config_fields = [
@@ -215,13 +214,13 @@ class PoolConfiguration(models.Model):
         # Most dicts/lists are optional except for the allowed_regions
         # field. Without that, we obviously cannot spawn any instances, so
         # we should report this field if it's missing or empty.
-        if not flat_config.allowed_regions:
-            missing_fields.append("allowed_regions")
+        if not flat_config.ec2_allowed_regions:
+            missing_fields.append("ec2_allowed_regions")
 
         return missing_fields
 
 
-@receiver(models.signals.post_delete, sender=PoolConfiguration.provider)
+@receiver(models.signals.post_delete, sender=PoolConfiguration)
 def deletePoolConfigurationFiles(sender, instance, **kwargs):
     if instance.userdata:
         filename = instance.file.path

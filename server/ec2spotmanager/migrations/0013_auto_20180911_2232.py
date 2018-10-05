@@ -15,11 +15,6 @@ class Migration(migrations.Migration):
     operations = [
         migrations.RenameField(
             model_name='poolconfiguration',
-            old_name='ec2_max_price',
-            new_name='max_price',
-        ),
-        migrations.RenameField(
-            model_name='poolconfiguration',
             old_name='ec2_userdata_macros',
             new_name='userdata_macros',
         ),

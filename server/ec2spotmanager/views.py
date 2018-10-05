@@ -287,7 +287,7 @@ def viewConfig(request, configid):
     return render(request, 'config/view.html', {'config': config})
 
 
-def __handleEC2SpotConfigPOST(request, config):
+def __handleConfigPOST(request, config):
     if int(request.POST['parent']) < 0:
         config.parent = None
     else:
@@ -316,13 +316,13 @@ def __handleEC2SpotConfigPOST(request, config):
     else:
         config.ec2_image_name = None
 
-    if request.POST['max_price']:
-        config.max_price = float(request.POST['max_price'])
+    if request.POST['ec2_max_price']:
+        config.ec2_max_price = float(request.POST['ec2_max_price'])
     else:
-        config.max_price = None
+        config.ec2_max_price = None
 
-    if request.POST['allowed_regions']:
-        config.allowed_regions_list = [x.strip() for x in request.POST['allowed_regions'].split(',')]
+    if request.POST['ec2_allowed_regions']:
+        config.ec2_allowed_regions_list = [x.strip() for x in request.POST['ec2_allowed_regions'].split(',')]
     else:
         config.allowed_regions_list = None
     config.allowed_regions_override = request.POST.get('allowed_regions_override', 'off') == 'on'
@@ -360,9 +360,6 @@ def __handleEC2SpotConfigPOST(request, config):
         config.ec2_raw_config_dict = None
     config.ec2_raw_config_override = request.POST.get('ec2_raw_config_override', 'off') == 'on'
 
-    if request.POST['provider']:
-        config.provider = request.POST['provider']
-
     # Ensure we have a primary key before attempting to store files
     config.save()
 
@@ -383,12 +380,10 @@ def __handleEC2SpotConfigPOST(request, config):
 
 
 @deny_restricted_users
-def createConfig(request, provider):
+def createConfig(request):
     if request.method == 'POST':
         config = PoolConfiguration()
-        cloud_post_method = "__handle" + provider + "ConfigPOST"
-        post_method = getattr(sys.modules[__name__], cloud_post_method)
-        return post_method(request, config)
+        return __handleConfigPOST(request, config)
     elif request.method == 'GET':
         configurations = PoolConfiguration.objects.all()
 
@@ -419,9 +414,7 @@ def editConfig(request, configid):
     config.deserializeFields()
 
     if request.method == 'POST':
-        cloud_post_method = "__handle" + config.provider + "ConfigPOST"
-        post_method = getattr(sys.modules[__name__], cloud_post_method)
-        return post_method(request, config)
+        return __handleConfigPOST(request, config)
     elif request.method == 'GET':
         configurations = PoolConfiguration.objects.all()
         data = {'config': config,

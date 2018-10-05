@@ -1,4 +1,3 @@
-
 '''
 Source Code Provider Interface
 
@@ -22,6 +21,8 @@ import six
 INSTANCE_STATE_CODE = {-1: "requested", 0: "pending", 16: "running", 32: "shutting-down",
                        48: "terminated", 64: "stopping", 80: "stopped"}
 INSTANCE_STATE = dict((val, key) for key, val in INSTANCE_STATE_CODE.items())
+
+PROVIDERS = ['EC2Spot']
 
 
 @six.add_metaclass(ABCMeta)
@@ -165,7 +166,7 @@ class CloudProvider():
         @param flattened config
 
         @rtype image_names: dictionary
-        @param image_names: regions as keys data is redis query string.
+        @return image_names: regions as keys data is redis query string.
 
         '''
         return
@@ -182,7 +183,7 @@ class CloudProvider():
         @param config: flattened config
 
         @rtype image_id: string
-        @param image_id: cloudp provider ID for image
+        @return image_id: cloud provider ID for image
 
         '''
         return

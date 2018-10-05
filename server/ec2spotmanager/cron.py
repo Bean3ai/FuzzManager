@@ -108,6 +108,7 @@ def check_instance_pools():
 @app.task
 def update_spot_prices():
     from .models import PoolConfiguration
+    from .CloudProvider.CloudProvider import PROVIDERS
 
     """Periodically refresh spot price history and store it in redis to be consumed when spot instances are created.
 
@@ -116,21 +117,27 @@ def update_spot_prices():
     and values as JSON objects {region: {az: [prices]}} like:
         '{"us-east-1": {"us-east-1a": [0.08000, ...]}}'
     """
-
     regions = set()
     for cfg in PoolConfiguration.objects.all():
-        if cfg.allowed_regions:
-            regions |= set(json.loads(cfg.allowed_regions))
+        config = cfg.flatten()
+        for provider in PROVIDERS:
+            cloud_provider = Provider().getInstance(provider)
+            if not cloud_provider.config_supported(config):
+                continue         
+            allowed_regions = cloud_provider.get_allowed_regions(config)
 
-        now = timezone.now()
-        expires = now + datetime.timedelta(hours=12)  # how long this data is valid (if not replaced)
-        cloud_provider = Provider().getInstance(cfg.provider)
-        prices = cloud_provider.get_spot_prices(regions)
-        # use pipeline() so everything is in 1 transaction
-        cache = redis.StrictRedis(host=settings.REDIS_HOST, port=settings.REDIS_PORT, db=settings.REDIS_DB).pipeline()
-        for instance_type in prices:
-            key = cfg.provider + ':price:' + instance_type
-            cache.delete(key)
-            cache.set(key, json.dumps(prices[instance_type], separators=(',', ':')))
-            cache.expireat(key, expires)
-            cache.execute()  # commit to redis
+            print(allowed_regions)
+
+            if allowed_regions:
+                regions |= set(allowed_regions)
+            prices = cloud_provider.get_spot_prices(regions)
+            now = timezone.now()
+            expires = now + datetime.timedelta(hours=12)  # how long this data is valid (if not replaced)
+            # use pipeline() so everything is in 1 transaction
+            cache = redis.StrictRedis(host=settings.REDIS_HOST, port=settings.REDIS_PORT, db=settings.REDIS_DB).pipeline()
+            for instance_type in prices:
+                key = provider + ':price:' + instance_type
+                cache.delete(key)
+                cache.set(key, json.dumps(prices[instance_type], separators=(',', ':')))
+                cache.expireat(key, expires)
+                cache.execute()  # commit to redis
