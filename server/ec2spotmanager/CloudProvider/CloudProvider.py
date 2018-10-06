@@ -37,7 +37,7 @@ class CloudProvider():
         Take a list of instances and stop them in the cloud provider.
 
         @ptype pool_id: int
-        @ptype pool_id: id of the instance pool
+        @param pool_id: id of the instance pool. Used to search tags.
 
         @ptype instances: dictionay
         @param instances: keys are regions and instances are values.
@@ -50,9 +50,9 @@ class CloudProvider():
         return
 
     @abstractmethod
-    def start_instances(self,config, region, zone, userdata, image, instance_type, count):
+    def start_instances(self, config, region, zone, userdata, image, instance_type, count):
         '''
-        Start pool instances using a specific configuration.
+        Start instances using a specific configuration.
 
         @ptype config: FlatObject
         @param config: a flattened config
@@ -61,7 +61,7 @@ class CloudProvider():
         @param region: region where instances are to be starteds.
 
         @ptype zone: string
-        @param zone: contains dictionary of blacklisted locations.
+        @param zone: zone this instance will be started in.
 
         @ptype userdata: UserData object
         @param userdata: userdata script to start with.
@@ -70,28 +70,24 @@ class CloudProvider():
         @param image: image reference used to start instances
 
         @ptype instance_type: string
-        @param instance_type: type of instnace
+        @param instance_type: type of instance
 
         @ptype count: int
         @param count: number of instances to start
 
-        @rtype requested_instances: dictionary
-        @param requested_instances: all requested instances. Requests
-        as keys, values are the data pieces necessary for an Instance.
+        @rtype requested_instances: list
+        @param requested_instances: list of request ids.
 
         '''
         return
 
     @abstractmethod
-    def check_instances_requests(self, region, pool_id, req_ids, tags):
+    def check_instances_requests(self, region, req_ids, tags):
         '''
         take a list of req_ids and determine state of instance
 
         @ptype region: string
-        @ptype region: the region the instances are in.
-
-        @ptype pool_id: int
-        @ptype pool_id: ID of the pool the instances are located.
+        @param region: the region the instances are in.
 
         @ptype list: req_ids
         @param list of request ids
@@ -100,10 +96,10 @@ class CloudProvider():
         @param tags: dictionary of instance tags.
 
         @rtype successful_requests: dictionary
-        @param req_id as key, hostname, new instanceid, status as data
+        @return req_id as key, hostname, new instanceid, status as data
 
         @rtype failed_requests: dictionary
-        @param req_id and data that can be used to blacklist or disable pool
+        @return req_id and data that can be used to blacklist or disable pool
 
         '''
         return
@@ -114,7 +110,8 @@ class CloudProvider():
         queries cloud provider and gathers current instances and their states.
 
         @ptype pool_id: int
-        @param list of pool instances are located in.
+        @param list of pool instances are located in. We search for
+        instances using the poolID tag.
 
         @ptype region: string
         @param region: region where instances are located
@@ -180,7 +177,7 @@ class CloudProvider():
 
         @rtype image_name: string
         @return image_name: cloud specific image name from config
-        
+
         '''
         return
 
@@ -244,3 +241,6 @@ class CloudProvider():
 
         @rtype prices: dictionary
         @param prices: price data for that region
+
+        '''
+        return

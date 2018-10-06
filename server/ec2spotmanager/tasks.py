@@ -144,7 +144,7 @@ def _start_pool_instances(pool, config, count=1):
         elif instance_size == smallest_size:
             smallest.append(instance_type)
         instance_types = acceptable_types or smallest
-    
+
     userdata = _setup_userdata(config, pool)
 
     try:
@@ -152,13 +152,14 @@ def _start_pool_instances(pool, config, count=1):
             region, zone, instance_type, rejected_prices = _determine_best_location(config,
                                                                                     allowed_regions,
                                                                                     instance_types,
-                                                                                    cloud_provider, 
+                                                                                    cloud_provider,
                                                                                     cores_per_instance)
 
             if not region:
                 logger.warning("[Pool %d] No allowed region was cheap enough to spawn instances.", pool.id)
 
-                priceLowEntries = PoolStatusEntry.objects.filter(pool=pool, type=POOL_STATUS_ENTRY_TYPE['price-too-low'])
+                priceLowEntries = PoolStatusEntry.objects.filter(pool=pool,
+                                                                 type=POOL_STATUS_ENTRY_TYPE['price-too-low'])
 
                 if not priceLowEntries:
                     entry = PoolStatusEntry()
@@ -169,7 +170,7 @@ def _start_pool_instances(pool, config, count=1):
                         entry.msg += "\n%s at %s" % (zone, rejected_prices[zone])
                     entry.save()
                 return
-            
+
             image_key = PROVIDERS[0] + ":image:%s:%s" % (region, image_name)
             image = cache.get(image_key)
 
@@ -177,21 +178,22 @@ def _start_pool_instances(pool, config, count=1):
                 image = cloud_provider.get_image(region, config)
                 cache.set(image_key, image, ex=24 * 3600)
 
-            
-            requested_instances = cloud_provider.start_instances(config, region, zone, userdata, image, instance_type, count)
+            requested_instances = cloud_provider.start_instances(config, region, zone, userdata,
+                                                                 image, instance_type, count)
 
-        for requested_instance in requested_instances.keys():
-            instance = Instance()
-            instance.instance_id = requested_instance
-            instance.region = requested_instances[requested_instance]['region']
-            instance.zone = requested_instances[requested_instance]['zone']
-            instance.status_code = requested_instances[requested_instance]['status_code']
-            instance.pool = pool
-            instance.size = requested_instances[requested_instance]['size']
-            instance.save()
+            for requested_instance in requested_instances:
+                instance = Instance()
+                instance.instance_id = requested_instance
+                instance.region = region
+                instance.zone = zone
+                instance.status_code = INSTANCE_STATE["requested"]
+                instance.pool = pool
+                instance.size = cores_per_instance[instance_type]
+                instance.save()
 
     except Exception as msg:
         _update_pool_status(pool, msg)
+
 
 def _setup_userdata(config, pool):
     userdata = config.userdata.decode('utf-8')
@@ -208,6 +210,7 @@ def _setup_userdata(config, pool):
         raise Exception({"type": "unclassified", "data": "Configuration error: Failed to compile userdata"})
 
     return userdata
+
 
 def _determine_best_location(config, regions, instance_types, cloud_provider, cores_per_instance):
         from .common.prices import get_price_median
@@ -230,11 +233,12 @@ def _determine_best_location(config, regions, instance_types, cloud_provider, co
                     continue
                 if cloud_provider.uses_zones():
                     for zone in data[region]:
-                        if cache.get("%s:blacklist:%s:%s" % (cloud_provider.get_name(), zone, instance_type)) is not None:
+                        if cache.get("%s:blacklist:%s:%s" % (cloud_provider.get_name(),
+                                     zone, instance_type)) is not None:
                             logger.debug("%s/%s/%s is blacklisted", cloud_provider.get_name(), zone, instance_type)
                             continue
                         out_prices = [price / cores_per_instance[instance_type] for
-                                    price in data[region][zone]]
+                                      price in data[region][zone]]
                         if out_prices[0] > cloud_provider.get_max_price(config):
                             rejected_prices[zone] = min(rejected_prices.get(zone, 9999), out_prices[0])
                             continue
@@ -245,7 +249,7 @@ def _determine_best_location(config, regions, instance_types, cloud_provider, co
                             best_region = region
                             best_type = instance_type
                             logger.warning("Best price median currently %r in %s%s (%s)",
-                                                median, best_region, best_zone, best_type)
+                                           median, best_region, best_zone, best_type)
             return(best_region, best_zone, best_type, rejected_prices)
 
 

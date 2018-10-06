@@ -46,7 +46,6 @@ class PoolConfiguration(models.Model):
     ec2_image_name = models.CharField(max_length=255, blank=True, null=True)
     ec2_raw_config = models.CharField(max_length=4095, blank=True, null=True)
 
-
     def __init__(self, *args, **kwargs):
 
         self.ec2_tags_dict = None

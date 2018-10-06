@@ -14,7 +14,7 @@ file, You can obtain one at http://mozilla.org/MPL/2.0/.
 '''
 
 
-def get_spot_prices(self, regions, instance_types=None, use_multiprocess=False):
+def get_prices(regions, cloud_provider, instance_types=None, use_multiprocess=False):
     if use_multiprocess:
         from multiprocessing import Pool, cpu_count
         pool = Pool(cpu_count())
@@ -24,9 +24,9 @@ def get_spot_prices(self, regions, instance_types=None, use_multiprocess=False):
         for region in regions:
             args = [region, instance_types]
             if use_multiprocess:
-                results.append(pool.apply_async(self._get_spot_price_per_region, args))
+                results.append(pool.apply_async(cloud_provider.get_price_per_region, args))
             else:
-                results.append(self._get_spot_price_per_region(*args))
+                results.append(cloud_provider.get_price_per_region(*args))
 
         prices = {}
         for result in results:
@@ -44,6 +44,7 @@ def get_spot_prices(self, regions, instance_types=None, use_multiprocess=False):
 
 
 def get_price_median(data):
+    print('i am in price median')
     sdata = sorted(data)
     n = len(sdata)
     if not n % 2:

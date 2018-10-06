@@ -9,7 +9,6 @@ import boto.exception
 from django.utils import timezone
 from django.conf import settings
 from laniakea.core.providers.ec2 import EC2Manager
-from laniakea.core.userdata import UserData
 from .CloudProvider import CloudProvider, INSTANCE_STATE
 from ..tasks import SPOTMGR_TAG
 from ..common.ec2 import CORES_PER_INSTANCE
@@ -41,17 +40,17 @@ class EC2SpotCloudProvider(CloudProvider):
                         if not ((boto_instance.id in instance_ids[region]) or
                                 (state_code == INSTANCE_STATE['shutting-down'] or
                                  state_code == INSTANCE_STATE['terminated'])):
-                            self.logger.error("[Pool %d] Instance with EC2 ID %s (status %d) "
+                            self.logger.error("Instance with EC2 ID %s (status %d) "
                                               "is not in region list for region %s",
-                                              pool_id, boto_instance.id, state_code, region)
+                                              boto_instance.id, state_code, region)
 
                     cluster.terminate(boto_instances)
                 else:
-                    self.logger.info("[Pool %d] Terminating %s instances in region %s",
-                                     pool_id, len(instance_ids[region]), region)
+                    self.logger.info("Pool Terminating %s instances in region %s",
+                                     len(instance_ids[region]), region)
                     cluster.terminate(cluster.find(instance_ids=instance_ids[region]))
             except (boto.exception.EC2ResponseError, boto.exception.BotoServerError, ssl.SSLError, socket.error) as msg:
-                self.logger.exception("[Pool %d] terminate_pool_instances: boto failure: %s", pool_id, msg)
+                self.logger.exception("terminate_pool_instances: boto failure: %s", msg)
                 return 1
 
     def start_instances(self, config, region, zone, userdata, ami, instance_type, count=1):
@@ -91,7 +90,7 @@ class EC2SpotCloudProvider(CloudProvider):
                 images['default'].pop('image_name')
                 cluster.images = images
             except ssl.SSLError as msg:
-                self.logger.warning("start_pool_instances: Temporary failure in region %s: %s",region, msg)
+                self.logger.warning("start_pool_instances: Temporary failure in region %s: %s", region, msg)
                 raise Exception({"type": "temporary-failure", "data": "Temporary failure occured: %s" % str(msg)})
 
             except Exception as msg:
@@ -99,18 +98,14 @@ class EC2SpotCloudProvider(CloudProvider):
                 raise Exception({"type": "unclassified", "data": str(msg)})
 
             try:
-                instances = {}
+                instances = []
                 self.logger.info("Creating %dx %s instances... (%d cores total)", count,
                                  instance_type, count * CORES_PER_INSTANCE[instance_type])
-                for ec2_request in cluster.create_spot_requests(config.ec2_max_price * CORES_PER_INSTANCE[instance_type],
+                for ec2_request in cluster.create_spot_requests(config.ec2_max_price *
+                                                                CORES_PER_INSTANCE[instance_type],
                                                                 delete_on_termination=True,
                                                                 timeout=10 * 60):
-                    instances[ec2_request] = {}
-                    instances[ec2_request]['instance_id'] = ec2_request
-                    instances[ec2_request]['region'] = region
-                    instances[ec2_request]['zone'] = zone
-                    instances[ec2_request]['status_code'] = INSTANCE_STATE["requested"]
-                    instances[ec2_request]['size'] = CORES_PER_INSTANCE[instance_type]
+                    instances.append(ec2_request)
 
                 return instances
 
@@ -131,7 +126,7 @@ class EC2SpotCloudProvider(CloudProvider):
             self.logger.exception("start_pool_instances: unhandled failure: %s", msg)
             raise Exception({"type": "unclassified", "data": "Unclassified error occurred: %s" % str(msg)})
 
-    def check_instances_requests(self, region, pool_id, instances, tags):
+    def check_instances_requests(self, region, instances, tags):
         successful_requests = {}
         failed_requests = {}
 
@@ -146,7 +141,7 @@ class EC2SpotCloudProvider(CloudProvider):
 
         for req_id, result in zip(instances, results):
             if isinstance(result, boto.ec2.instance.Instance):
-                self.logger.info("[Pool %d] spot request fulfilled %s -> %s", pool_id, req_id, result.id)
+                self.logger.info("Spot request fulfilled %s -> %s", req_id, result.id)
 
                 # spot request has been fulfilled
                 successful_requests[req_id] = {}
@@ -163,28 +158,26 @@ class EC2SpotCloudProvider(CloudProvider):
             elif isinstance(result, boto.ec2.spotinstancerequest.SpotInstanceRequest):
                 if result.state in {"cancelled", "closed"}:
                     # request was not fulfilled for some reason.. blacklist this type/zone for a while
-                    self.logger.info("[Pool %d] spot request %s is %s", pool_id, req_id, result.state)
+                    self.logger.info("Spot request %s is %s", req_id, result.state)
                     failed_requests[req_id] = {}
                     failed_requests[req_id]['action'] = 'blacklist'
                     failed_requests[req_id]['instance_type'] = result.launch_specification.instance_type
                 elif result.state in {"open", "active"}:
                     # this should not happen! warn and leave in DB in case it's fulfilled later
-                    self.logger.warning("[Pool %d] Request %s is %s and %s.",
-                                        pool_id,
+                    self.logger.warning("Request %s is %s and %s.",
                                         req_id,
                                         result.status.code,
                                         result.state)
                 else:  # state=failed
                     msg = "Request %s is %s and %s." % (req_id, result.status.code, result.state)
-                    self.logger.error("[Pool %d] %s", pool_id, msg)
+                    self.logger.error(" %s", msg)
                     failed_requests[req_id] = {}
                     failed_requests[req_id]['action'] = 'disable_pool'
-                    failed_requests[req_id]['pool'] = pool_id
                     break
             elif result is None:
-                self.logger.info("[Pool %d] spot request %s is still open", pool_id, req_id)
+                self.logger.info("spot request %s is still open", req_id)
             else:
-                self.logger.warning("[Pool %d] spot request %s returned %s", pool_id, req_id, type(result).__name__)
+                self.logger.warning("Spot request %s returned %s", req_id, type(result).__name__)
 
         return (successful_requests, failed_requests)
 
@@ -251,7 +244,7 @@ class EC2SpotCloudProvider(CloudProvider):
     @staticmethod
     def get_name():
         return 'EC2Spot'
-    
+
     @staticmethod
     def get_cores_per_instance():
         return CORES_PER_INSTANCE

@@ -1,4 +1,3 @@
-import sys
 import json
 from operator import attrgetter
 from chartjs.colors import next_color

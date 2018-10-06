@@ -124,7 +124,7 @@ def update_prices():
         for provider in PROVIDERS:
             cloud_provider = Provider().getInstance(provider)
             if not cloud_provider.config_supported(config):
-                continue         
+                continue
             allowed_regions = cloud_provider.get_allowed_regions(config)
 
             print(allowed_regions)
@@ -135,7 +135,8 @@ def update_prices():
             now = timezone.now()
             expires = now + datetime.timedelta(hours=12)  # how long this data is valid (if not replaced)
             # use pipeline() so everything is in 1 transaction
-            cache = redis.StrictRedis(host=settings.REDIS_HOST, port=settings.REDIS_PORT, db=settings.REDIS_DB).pipeline()
+            cache = redis.StrictRedis(host=settings.REDIS_HOST, port=settings.REDIS_PORT,
+                                      db=settings.REDIS_DB).pipeline()
             for instance_type in prices:
                 key = provider + ':price:' + instance_type
                 cache.delete(key)
