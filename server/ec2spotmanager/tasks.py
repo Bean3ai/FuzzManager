@@ -119,34 +119,66 @@ def check_instance_pool(pool_id):
 
 def _start_pool_instances(pool, config, count=1):
     """ Start an instance with the given configuration """
-    from .models import Instance
+    from .models import Instance, PoolStatusEntry, POOL_STATUS_ENTRY_TYPE
     cache = redis.StrictRedis(host=settings.REDIS_HOST,
                               port=settings.REDIS_PORT, db=settings.REDIS_DB)
 
-    (prices, blacklisted_zones) = _get_cached_prices(config)
-
-    image_names = {}
-    images = {}
-    cache_entries = {}
     cloud_provider = Provider().getInstance(PROVIDERS[0])
     image_name = cloud_provider.get_image_name(config)
     allowed_regions = cloud_provider.get_allowed_regions(config)
+    instance_types = cloud_provider.get_instance_types(config)
 
-    for region in allowed_regions:
-        image_key = PROVIDERS[0] + ":image:%s:%s" % (region, image_name)
-        image = cache.get(image_key)
-        if image is None:
-            image = cloud_provider.get_image(region, config)
-            cache_entries[region] = image
-        if cache_entries:
-            cache.set(image_key, image, ex=24 * 3600)
-        images[region] = image
-
+    # Filter machine sizes that would put us over the number of cores required. If all do, then choose the smallest.
+    smallest = []
+    smallest_size = None
+    acceptable_types = []
+    cores_per_instance = cloud_provider.get_cores_per_instance()
+    for instance_type in list(instance_types):
+        instance_size = cores_per_instance[instance_type]
+        if instance_size <= count:
+            acceptable_types.append(instance_type)
+        # keep track of all instance types with the least number of cores for this config
+        if not smallest or instance_size < smallest_size:
+            smallest_size = instance_size
+            smallest = [instance_type]
+        elif instance_size == smallest_size:
+            smallest.append(instance_type)
+        instance_types = acceptable_types or smallest
+    
     userdata = _setup_userdata(config, pool)
 
     try:
-        requested_instances = cloud_provider.start_instances(config, prices, userdata,
-                                                             blacklisted_zones, images, count)
+        if cloud_provider.uses_zones():
+            region, zone, instance_type, rejected_prices = _determine_best_location(config,
+                                                                                    allowed_regions,
+                                                                                    instance_types,
+                                                                                    cloud_provider, 
+                                                                                    cores_per_instance)
+
+            if not region:
+                logger.warning("[Pool %d] No allowed region was cheap enough to spawn instances.", pool.id)
+
+                priceLowEntries = PoolStatusEntry.objects.filter(pool=pool, type=POOL_STATUS_ENTRY_TYPE['price-too-low'])
+
+                if not priceLowEntries:
+                    entry = PoolStatusEntry()
+                    entry.pool = pool
+                    entry.type = POOL_STATUS_ENTRY_TYPE['price-too-low']
+                    entry.msg = "No allowed regions was cheap enough to spawn instances."
+                    for zone in rejected_prices:
+                        entry.msg += "\n%s at %s" % (zone, rejected_prices[zone])
+                    entry.save()
+                return
+            
+            image_key = PROVIDERS[0] + ":image:%s:%s" % (region, image_name)
+            image = cache.get(image_key)
+
+            if image is None:
+                image = cloud_provider.get_image(region, config)
+                cache.set(image_key, image, ex=24 * 3600)
+
+            
+            requested_instances = cloud_provider.start_instances(config, region, zone, userdata, image, instance_type, count)
 
         for requested_instance in requested_instances.keys():
             instance = Instance()
@@ -177,28 +209,44 @@ def _setup_userdata(config, pool):
 
     return userdata
 
+def _determine_best_location(config, regions, instance_types, cloud_provider, cores_per_instance):
+        from .common.prices import get_price_median
+        cache = redis.StrictRedis(host=settings.REDIS_HOST, port=settings.REDIS_PORT, db=settings.REDIS_DB)
 
-def _get_cached_prices(config):
-    cache = redis.StrictRedis(host=settings.REDIS_HOST, port=settings.REDIS_PORT,
-                              db=settings.REDIS_DB)
-    prices = {}
-    cloud_provider = Provider().getInstance(PROVIDERS[0])
-    price_data = cloud_provider.get_price_data(config)
-    blacklisted_zones = []
-    for instance_type in price_data.keys():
-        data = cache.get(price_data[instance_type])
-        if data is None:
-            logger.warning("No price data for %s?", instance_type)
-            continue
-        prices[instance_type] = json.loads(data)
-
-    for instance_type in prices.keys():
-        for region in prices[instance_type]:
-            for zone in prices[instance_type][region]:
-                if cache.get(PROVIDERS[0] + ':blacklist:%s:%s' % (zone, instance_type)) is not None:
-                    blacklisted_zones.append((zone, instance_type))
-
-    return (prices, blacklisted_zones)
+        rejected_prices = {}
+        best_zone = None
+        best_region = None
+        best_type = None
+        best_median = None
+        allowed_regions = set(regions)
+        for instance_type in instance_types:
+            data = cache.get('%s:price:%s' % (cloud_provider.get_name(), instance_type))
+            if data is None:
+                logger.warning("No price data for %s?", instance_type)
+                continue
+            data = json.loads(data)
+            for region in data:
+                if region not in allowed_regions:
+                    continue
+                if cloud_provider.uses_zones():
+                    for zone in data[region]:
+                        if cache.get("%s:blacklist:%s:%s" % (cloud_provider.get_name(), zone, instance_type)) is not None:
+                            logger.debug("%s/%s/%s is blacklisted", cloud_provider.get_name(), zone, instance_type)
+                            continue
+                        out_prices = [price / cores_per_instance[instance_type] for
+                                    price in data[region][zone]]
+                        if out_prices[0] > cloud_provider.get_max_price(config):
+                            rejected_prices[zone] = min(rejected_prices.get(zone, 9999), out_prices[0])
+                            continue
+                        median = get_price_median(out_prices)
+                        if best_median is None or best_median > median:
+                            best_median = median
+                            best_zone = zone
+                            best_region = region
+                            best_type = instance_type
+                            logger.warning("Best price median currently %r in %s%s (%s)",
+                                                median, best_region, best_zone, best_type)
+            return(best_region, best_zone, best_type, rejected_prices)
 
 
 def _terminate_pool_instances(instance_pool, running_instances, terminateByPool=False):

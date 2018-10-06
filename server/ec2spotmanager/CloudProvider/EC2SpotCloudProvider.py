@@ -54,24 +54,8 @@ class EC2SpotCloudProvider(CloudProvider):
                 self.logger.exception("[Pool %d] terminate_pool_instances: boto failure: %s", pool_id, msg)
                 return 1
 
-    def start_instances(self, config, price_list, userdata, blacklisted_zones, image_ids, count=1):
+    def start_instances(self, config, region, zone, userdata, ami, instance_type, count=1):
         images = self._create_laniakea_images(config)
-        # Filter machine sizes that would put us over the number of cores required. If all do, then choose the smallest.
-        smallest = []
-        smallest_size = None
-        acceptable_types = []
-        for instance_type in list(config.ec2_instance_types):
-            instance_size = CORES_PER_INSTANCE[instance_type]
-            if instance_size <= count:
-                acceptable_types.append(instance_type)
-            # keep track of all instance types with the least number of cores for this config
-            if not smallest or instance_size < smallest_size:
-                smallest_size = instance_size
-                smallest = [instance_type]
-            elif instance_size == smallest_size:
-                smallest.append(instance_type)
-        # replace the allowed instance types with those that are <= count, or the smallest if none are
-        config.ec2_instance_types = acceptable_types or smallest
 
         # convert count from cores to instances
         #
@@ -88,7 +72,6 @@ class EC2SpotCloudProvider(CloudProvider):
         #     -> we will only request 1x 8-core instance this time around, leaving the required count at 4
         #     -> next time around, we will request 1x 4-core instance
         count = max(1, count // CORES_PER_INSTANCE[instance_type])
-        (region, zone, instance_type, rejected) = self._determine_best_price(config, price_list, blacklisted_zones)
         self.logger.info("Using instance type %s in region %s with availability zone %s.",
                          instance_type, region, zone)
         try:
@@ -103,8 +86,6 @@ class EC2SpotCloudProvider(CloudProvider):
             try:
                 cluster.connect(region=region, aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
                                 aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY)
-
-                ami = image_ids[region]
 
                 images['default']['image_id'] = ami
                 images['default'].pop('image_name')
@@ -227,40 +208,6 @@ class EC2SpotCloudProvider(CloudProvider):
 
         return instance_states
 
-    def get_spot_prices(self, regions, instance_types=None, use_multiprocess=False):
-        if use_multiprocess:
-            from multiprocessing import Pool, cpu_count
-            pool = Pool(cpu_count())
-
-        try:
-            results = []
-            for region in regions:
-                args = [region, instance_types]
-                if use_multiprocess:
-                    results.append(pool.apply_async(self._get_spot_price_per_region, args))
-                else:
-                    results.append(self._get_spot_price_per_region(*args))
-
-            prices = {}
-            for result in results:
-                if use_multiprocess:
-                    result = result.get()
-                for instance_type in result:
-                    prices.setdefault(instance_type, {})
-                    prices[instance_type].update(result[instance_type])
-        finally:
-            if use_multiprocess:
-                pool.close()
-                pool.join()
-
-        return prices
-
-    def get_price_data(self, config):
-        price_data = {}
-        for instance_type in config.ec2_instance_types:
-            price_data[instance_type] = "EC2Spot:price:" + instance_type
-        return price_data
-
     def get_image(self, region, config):
         images = self._create_laniakea_images(config)
         cluster = EC2Manager(None)
@@ -289,7 +236,27 @@ class EC2SpotCloudProvider(CloudProvider):
     def get_image_name(config):
         return config.ec2_image_name
 
-    def _get_spot_price_per_region(self, region_name, instance_types=None):
+    @staticmethod
+    def get_instance_types(config):
+        return config.ec2_instance_types
+
+    @staticmethod
+    def get_max_price(config):
+        return config.ec2_max_price
+
+    @staticmethod
+    def uses_zones():
+        return True
+
+    @staticmethod
+    def get_name():
+        return 'EC2Spot'
+    
+    @staticmethod
+    def get_cores_per_instance():
+        return CORES_PER_INSTANCE
+
+    def get_price_per_region(self, region_name, instance_types=None):
         '''Gets spot prices of the specified region and instance type'''
         prices = {}  # {instance-type: region: {az: [prices]}}}
         zone_blacklist = ["us-east-1a", "us-east-1f"]
@@ -341,36 +308,3 @@ class EC2SpotCloudProvider(CloudProvider):
             images["default"].update(config.ec2_raw_config)
 
         return images
-
-    def _determine_best_price(self, config, prices, blacklisted_zones):
-        from ..common.prices import get_price_median
-        rejected_prices = {}
-        best_zone = None
-        best_region = None
-        best_type = None
-        best_median = None
-        allowed_regions = set(config.ec2_allowed_regions)
-        for instance_type in prices.keys():
-            if instance_type not in config.ec2_instance_types:
-                continue
-            for region in prices[instance_type]:
-                if region not in allowed_regions:
-                    continue
-                for zone in prices[instance_type][region]:
-                    if (zone, instance_type) in blacklisted_zones:
-                        self.logger.debug("%s %s is blacklisted", zone, instance_type)
-                        continue
-                    out_prices = [price / CORES_PER_INSTANCE[instance_type] for
-                                  price in prices[instance_type][region][zone]]
-                    if out_prices[0] > config.ec2_max_price:
-                        rejected_prices[zone] = min(rejected_prices.get(zone, 9999), out_prices[0])
-                        continue
-                    median = get_price_median(out_prices)
-                    if best_median is None or best_median > median:
-                        best_median = median
-                        best_zone = zone
-                        best_region = region
-                        best_type = instance_type
-                        self.logger.warning("Best price median currently %r in %s%s (%s)",
-                                            median, best_region, best_zone, best_type)
-        return(best_region, best_zone, best_type, rejected_prices)

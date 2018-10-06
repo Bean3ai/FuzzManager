@@ -50,24 +50,27 @@ class CloudProvider():
         return
 
     @abstractmethod
-    def start_instances(self, pool_id, config, price_list, blacklist, image_ids, count):
+    def start_instances(self,config, region, zone, userdata, image, instance_type, count):
         '''
         Start pool instances using a specific configuration.
-
-        @ptype pool_id: int
-        @param pool_id: id of the pool the instances will go.
 
         @ptype config: FlatObject
         @param config: a flattened config
 
-        @rtype price_list: dictionary
-        @param price_list: regions are keys, price/instances are values.
+        @rtype region: string
+        @param region: region where instances are to be starteds.
 
-        @ptype blacklist: dictionary
-        @param blacklist: contains dictionary of blacklisted locations.
+        @ptype zone: string
+        @param zone: contains dictionary of blacklisted locations.
 
-        @ptype image_ids: dictionary
-        @param image_ids: region as keys, cloud image id as data.
+        @ptype userdata: UserData object
+        @param userdata: userdata script to start with.
+
+        @ptype image: string
+        @param image: image reference used to start instances
+
+        @ptype instance_type: string
+        @param instance_type: type of instnace
 
         @ptype count: int
         @param count: number of instances to start
@@ -75,6 +78,7 @@ class CloudProvider():
         @rtype requested_instances: dictionary
         @param requested_instances: all requested instances. Requests
         as keys, values are the data pieces necessary for an Instance.
+
         '''
         return
 
@@ -122,56 +126,6 @@ class CloudProvider():
         return
 
     @abstractmethod
-    def get_spot_prices(self, regions, instance_types, use_multiprocess):
-        '''
-        returns a dictionary of all regions and prices for all instance types.
-
-        @ptype regions: set
-        @param regions: set of regions to be queried
-
-        @ptype instance_types: set
-        @ptype instance_types set of instance types. This is optional.
-
-        @ptype use_multiprocess: bool
-        @param use_multiprocess: determines whether this method uses multiple processes.
-                                 default is False.
-
-        @rtype prices: dictionary
-        @param prices: instance types are the keys, values as JSON objects
-                       to be stored by in a redis db.
-
-        '''
-        return
-
-    @abstractmethod
-    def get_price_data(self, config):
-        '''
-        Used to create a list of query strings for redis queries
-
-        @ptype config: FlatObject
-        @param config: flattened config
-
-        @rtype price_data: dictionary
-        @param price_data: dictionary query key and data for redis
-
-        '''
-        return
-
-    @abstractmethod
-    def get_image_names(self, config):
-        '''
-        Used to create set of query strings for redis
-
-        @ptype config: FlatObject
-        @param flattened config
-
-        @rtype image_names: dictionary
-        @return image_names: regions as keys data is redis query string.
-
-        '''
-        return
-
-    @abstractmethod
     def get_image(self, region, config):
         '''
         Used to get image ID from image name
@@ -187,3 +141,106 @@ class CloudProvider():
 
         '''
         return
+
+    @staticmethod
+    @abstractmethod
+    def get_cores_per_instance():
+        '''
+        returns ditionary of instance types and their cores value.
+
+        @rtype cores_per_instance: dictionary
+        @return cores_per_instance: instances and how many cores they have
+
+        '''
+        return
+
+    @staticmethod
+    @abstractmethod
+    def get_allowed_regions(config):
+        '''
+        returns cloud povider specific regions
+
+        @ptype config: FlatObject
+        @param config: pulling regions from config
+
+        @rtype allowed_regions: list
+        @return allowed_regions: regions pulled from config
+
+        '''
+        return
+
+    @staticmethod
+    @abstractmethod
+    def get_image_name(config):
+        '''
+        Used to get provider specific image name from config.
+
+        @ptype config: FlatOboject
+        @param config: pulling image name from config
+
+        @rtype image_name: string
+        @return image_name: cloud specific image name from config
+        
+        '''
+        return
+
+    @staticmethod
+    @abstractmethod
+    def get_instance_types(config):
+        '''
+        Used to get provider specific instance_types
+
+        @ptype config: FlatObject
+        @param config: cloug specific instance_types from config
+
+        '''
+        return
+
+    @staticmethod
+    @abstractmethod
+    def get_max_price(config):
+        '''
+        Used to get provider specific max_price
+
+        @ptype config: FlatObject
+        @param config: cloud specific max_price from config
+
+        @rtype max_price: float
+        @return max_price cloud specific max_price
+
+        '''
+        return
+
+    @staticmethod
+    @abstractmethod
+    def uses_zones():
+        '''
+        Returns whether cloud provider requires zones or not
+
+        @rtype bool
+        @return True if provider uses zones
+
+        '''
+
+    @staticmethod
+    @abstractmethod
+    def get_name():
+        '''
+        Used to return name of cloud provider. Used by Redis.
+
+        @rtype name: string
+        @return name: string representation of the cloud provider.
+
+        '''
+        return
+
+    @abstractmethod
+    def get_price_per_region(region_name, instance_types):
+        '''
+        Used by get_prices to get provider specific prices
+
+        @ptype region_name: string
+        @param region_name: region to grab prices
+
+        @rtype prices: dictionary
+        @param prices: price data for that region

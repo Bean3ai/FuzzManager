@@ -106,8 +106,9 @@ def check_instance_pools():
 
 
 @app.task
-def update_spot_prices():
+def update_prices():
     from .models import PoolConfiguration
+    from .common.prices import get_prices
     from .CloudProvider.CloudProvider import PROVIDERS
 
     """Periodically refresh spot price history and store it in redis to be consumed when spot instances are created.
@@ -130,7 +131,7 @@ def update_spot_prices():
 
             if allowed_regions:
                 regions |= set(allowed_regions)
-            prices = cloud_provider.get_spot_prices(regions)
+            prices = get_prices(regions, cloud_provider)
             now = timezone.now()
             expires = now + datetime.timedelta(hours=12)  # how long this data is valid (if not replaced)
             # use pipeline() so everything is in 1 transaction
