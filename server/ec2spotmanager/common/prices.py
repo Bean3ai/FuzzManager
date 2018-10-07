@@ -44,7 +44,6 @@ def get_prices(regions, cloud_provider, instance_types=None, use_multiprocess=Fa
 
 
 def get_price_median(data):
-    print('i am in price median')
     sdata = sorted(data)
     n = len(sdata)
     if not n % 2:

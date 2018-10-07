@@ -118,7 +118,6 @@ def viewPoolPrices(request, poolid):
 
     pool = get_object_or_404(InstancePool, pk=poolid)
     config = pool.config.provider.flatten()
-    print(config)
     allowed_regions = set(config.allowed_regions)
     zones = set()
     latest_price_by_zone = {}

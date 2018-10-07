@@ -120,7 +120,6 @@ def update_prices():
 
     regions = set()
     for provider in PROVIDERS:
-        print('doing %s provider' % provider)
         cloud_provider = CloudProvider.getInstance(provider)
         for cfg in PoolConfiguration.objects.all():
             config = cfg.flatten()
@@ -128,7 +127,6 @@ def update_prices():
                 allowed_regions = cloud_provider.get_allowed_regions(config)
                 if allowed_regions:
                     regions |= set(allowed_regions)
-                    print(regions)
         prices = get_prices(regions, cloud_provider)
         now = timezone.now()
         expires = now + datetime.timedelta(hours=12)  # how long this data is valid (if not replaced)
@@ -137,9 +135,7 @@ def update_prices():
                                   db=settings.REDIS_DB).pipeline()
         for instance_type in prices:
             key = provider + ':price:' + instance_type
-            print(key)
             cache.delete(key)
             cache.set(key, json.dumps(prices[instance_type], separators=(',', ':')))
             cache.expireat(key, expires)
         cache.execute()  # commit to redis
-        
