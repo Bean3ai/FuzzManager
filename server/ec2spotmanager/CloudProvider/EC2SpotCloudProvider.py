@@ -20,7 +20,7 @@ class EC2SpotCloudProvider(CloudProvider):
 
     def terminate_instances(self, instance_ids_by_region):
 
-        for region in instance_ids:
+        for region in instance_ids_by_region:
             cluster = EC2Manager(None)
             try:
                 cluster.connect(region=region, aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
@@ -30,14 +30,14 @@ class EC2SpotCloudProvider(CloudProvider):
 
             try:
                 self.logger.info("Pool Terminating %s instances in region %s",
-                                 len(instance_ids[region]), region)
+                                 len(instance_ids_by_region[region]), region)
                 boto_instances = cluster.find(instance_ids=instance_ids_by_region[region])
                 # Data consistency checks
                 for boto_instance in boto_instances:
                     # state_code is a 16-bit value where the high byte is
                     # an opaque internal value and should be ignored.
                     state_code = boto_instance.state_code & 255
-                    if not ((boto_instance.id in instance_ids[region]) or
+                    if not ((boto_instance.id in instance_ids_by_region[region]) or
                             (state_code == INSTANCE_STATE['shutting-down'] or
                                 state_code == INSTANCE_STATE['terminated'])):
                         self.logger.error("Instance with EC2 ID %s (status %d) "
