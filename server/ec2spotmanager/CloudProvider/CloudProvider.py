@@ -32,12 +32,12 @@ class CloudProvider():
 
     '''
     @abstractmethod
-    def terminate_instances(self, instances_ids):
+    def terminate_instances(self, instances_ids_by_region):
         '''
         Take a list of instances and stop them in the cloud provider.
 
-        @ptype instances: dictionay
-        @param instances: keys are regions and instances are values.
+        @ptype instance_ids_by_region: dictionary
+        @param instance_ids_by_region: keys are regions and instances are values.
 
         @rtype none
         '''
@@ -49,7 +49,8 @@ class CloudProvider():
         Start instances using a specific configuration.
 
         @ptype config: FlatObject
-        @param config: a flattened config
+        @param config: a flattened config. We use this for any
+        cloud provider specific fields needed to create an instance.
 
         @rtype region: string
         @param region: region where instances are to be starteds.
@@ -82,6 +83,13 @@ class CloudProvider():
         Since this is the first point we see an actual running instance
         we set the tags on the instance here.
 
+        We create a dictionary of succesful requestions. This has hostname,
+        instance id, and status of the instance. This status must match the 
+        INSTANCE_STATE in CloudProvider.
+
+        Failed requests will have an action and instance type. Currently, we 
+        support actions of 'blacklist' and disable_pool.
+
         @ptype region: string
         @param region: the region the instances are in.
 
@@ -91,11 +99,8 @@ class CloudProvider():
         @ptype tags: dictionary
         @param tags: dictionary of instance tags.
 
-        @rtype successful_requests: dictionary
-        @return req_id as key, hostname, new instanceid, status as data
-
-        @rtype failed_requests: dictionary
-        @return req_id and data that can be used to blacklist or disable pool
+        @rtype tuple
+        @return tuple containing two dictoinariessuccessful requests and failed requests.
 
         '''
         return

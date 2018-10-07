@@ -18,7 +18,7 @@ class EC2SpotCloudProvider(CloudProvider):
     def __init__(self):
         self.logger = logging.getLogger("ec2spotmanager")
 
-    def terminate_instances(self, instance_ids):
+    def terminate_instances(self, instance_ids_by_region):
 
         for region in instance_ids:
             cluster = EC2Manager(None)
@@ -31,7 +31,7 @@ class EC2SpotCloudProvider(CloudProvider):
             try:
                 self.logger.info("Pool Terminating %s instances in region %s",
                                  len(instance_ids[region]), region)
-                boto_instances = cluster.find(instance_ids=instance_ids[region])
+                boto_instances = cluster.find(instance_ids=instance_ids_by_region[region])
                 # Data consistency checks
                 for boto_instance in boto_instances:
                     # state_code is a 16-bit value where the high byte is
@@ -165,8 +165,7 @@ class EC2SpotCloudProvider(CloudProvider):
                                         result.status.code,
                                         result.state)
                 else:  # state=failed
-                    msg = "Request %s is %s and %s." % (req_id, result.status.code, result.state)
-                    self.logger.error(" %s", msg)
+                    self.logger.error("Request %s is %s and %s." % (req_id, result.status.code, result.state))
                     failed_requests[req_id] = {}
                     failed_requests[req_id]['action'] = 'disable_pool'
                     break
