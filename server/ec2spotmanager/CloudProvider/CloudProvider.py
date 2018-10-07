@@ -32,18 +32,12 @@ class CloudProvider():
 
     '''
     @abstractmethod
-    def terminate_instances(self, pool_id, instances_ids, terminatedByPool):
+    def terminate_instances(self, instances_ids):
         '''
         Take a list of instances and stop them in the cloud provider.
 
-        @ptype pool_id: int
-        @param pool_id: id of the instance pool. Used to search tags.
-
         @ptype instances: dictionay
         @param instances: keys are regions and instances are values.
-
-        @ptype terminatedByPool: bool
-        @param terminatedByPool: defines whether a single instance or pool is disabled.
 
         @rtype none
         '''
@@ -82,15 +76,17 @@ class CloudProvider():
         return
 
     @abstractmethod
-    def check_instances_requests(self, region, req_ids, tags):
+    def check_instances_requests(self, region, instances, tags):
         '''
         take a list of req_ids and determine state of instance
+        Since this is the first point we see an actual running instance
+        we set the tags on the instance here.
 
         @ptype region: string
         @param region: the region the instances are in.
 
-        @ptype list: req_ids
-        @param list of request ids
+        @ptype list: instances
+        @param list of instance request ids
 
         @ptype tags: dictionary
         @param tags: dictionary of instance tags.
@@ -117,7 +113,8 @@ class CloudProvider():
         @param region: region where instances are located
 
         @rtype instance_states: dictionary
-        @param running instances and their states.
+        @param running instances and their states. State must 
+        comply with INSTANCE_STATE defined in CloudProvider
 
         '''
         return
@@ -231,8 +228,25 @@ class CloudProvider():
         '''
         return
 
+    @staticmethod
     @abstractmethod
-    def get_price_per_region(region_name, instance_types):
+    def config_supported(config):
+        '''
+        Takes a list of fields that are specific to the cloud provider
+        and compares them to the config. If the any cloud field is in the config
+        returns True
+
+        @ptype config: FlatObject
+        @param config: Flattened config.
+
+        @rtype: bool
+        @return: True if any specified field in config
+
+        '''
+        return
+
+    @abstractmethod
+    def get_price_per_region(self, region_name, instance_types):
         '''
         Used by get_prices to get provider specific prices
 
@@ -240,7 +254,19 @@ class CloudProvider():
         @param region_name: region to grab prices
 
         @rtype prices: dictionary
-        @param prices: price data for that region
+        @return prices: price data for that region
 
         '''
         return
+
+    @staticmethod
+    def getInstance(provider):
+        '''
+
+        This is a method that is used to instanitate the provider class. Do not implement.
+
+        '''
+        classname = provider + 'CloudProvider'
+        providerModule = __import__('ec2spotmanager.CloudProvider.%s' % classname, fromlist=[classname])
+        providerClass = getattr(providerModule, classname)
+        return providerClass()

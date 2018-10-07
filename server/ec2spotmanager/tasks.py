@@ -5,9 +5,8 @@ import fasteners
 from django.conf import settings
 from django.utils import timezone
 from celeryconf import app
-from .Provider import Provider
 from laniakea.core.userdata import UserData
-from .CloudProvider.CloudProvider import INSTANCE_STATE, PROVIDERS
+from .CloudProvider.CloudProvider import INSTANCE_STATE, PROVIDERS, CloudProvider
 from . import cron  # noqa ensure cron tasks get registered
 
 
@@ -123,7 +122,7 @@ def _start_pool_instances(pool, config, count=1):
     cache = redis.StrictRedis(host=settings.REDIS_HOST,
                               port=settings.REDIS_PORT, db=settings.REDIS_DB)
 
-    cloud_provider = Provider().getInstance(PROVIDERS[0])
+    cloud_provider = CloudProvider.getInstance(PROVIDERS[0])
     image_name = cloud_provider.get_image_name(config)
     allowed_regions = cloud_provider.get_allowed_regions(config)
     instance_types = cloud_provider.get_instance_types(config)
@@ -255,12 +254,16 @@ def _determine_best_location(config, regions, instance_types, cloud_provider, co
 
 def _terminate_pool_instances(instance_pool, running_instances, terminateByPool=False):
     """ Terminate an instance with the given configuration """
-    cloud_provider = Provider().getInstance(PROVIDERS[0])
+    from .models import Instance
+    cloud_provider = CloudProvider.getInstance(PROVIDERS[0])
+
+    if terminateByPool:
+        running_instances = Instance.objects.filter(pool=instance_pool)
 
     instance_ids = _get_instance_ids_by_region(running_instances)
 
     try:
-        cloud_provider.terminate_instances(instance_pool.id, instance_ids, terminateByPool=True)
+        cloud_provider.terminate_instances(instance_ids)
     except Exception as msg:
         _update_pool_status(instance_pool, msg)
 
@@ -286,9 +289,9 @@ def _get_instances_by_ids(instances):
 def _update_pool_status(pool, msg):
     from .models import PoolStatusEntry, POOL_STATUS_ENTRY_TYPE
     entry = PoolStatusEntry()
-    entry.type = POOL_STATUS_ENTRY_TYPE[msg[0]['type']]
+    entry.type = POOL_STATUS_ENTRY_TYPE[msg['type']]
     entry.pool = pool
-    entry.msg = msg[0]['data']
+    entry.msg = msg['data']
     entry.isCritical = True
     entry.save()
 
@@ -302,7 +305,7 @@ def _update_pool_instances(pool, config):
     debug_not_in_region = {}
 
     cache = redis.StrictRedis(host=settings.REDIS_HOST, port=settings.REDIS_PORT, db=settings.REDIS_DB)
-    cloud_provider = Provider().getInstance(PROVIDERS[0])
+    cloud_provider = CloudProvider.getInstance(PROVIDERS[0])
 
     instances = Instance.objects.filter(pool=pool)
     instance_ids_by_region = _get_instance_ids_by_region(instances)
@@ -331,7 +334,6 @@ def _update_pool_instances(pool, config):
 
             if requested:
                 (successful_requests, failed_requests) = cloud_provider.check_instances_requests(region,
-                                                                                                 pool.id,
                                                                                                  requested,
                                                                                                  config.ec2_tags)
                 for req_id in successful_requests.keys():
@@ -414,7 +416,7 @@ def _update_pool_instances(pool, config):
                     instance.save()
 
         except Exception as msg:
-            _update_pool_status(pool, {'type': 'unclassifed', 'data': msg})
+            _update_pool_status(pool, {'type': 'unclassified', 'data': msg})
 
     for instance in instances_left:
         reasons = []

@@ -18,7 +18,7 @@ class EC2SpotCloudProvider(CloudProvider):
     def __init__(self):
         self.logger = logging.getLogger("ec2spotmanager")
 
-    def terminate_instances(self, pool_id, instance_ids, terminateByPool=False):
+    def terminate_instances(self, instance_ids):
 
         for region in instance_ids:
             cluster = EC2Manager(None)
@@ -29,29 +29,25 @@ class EC2SpotCloudProvider(CloudProvider):
                 raise Exception({"type": "unclassified", "data": msg})
 
             try:
-                if terminateByPool:
-                    boto_instances = cluster.find(filters={"tag:" + SPOTMGR_TAG + "-PoolId": str(pool_id)})
-
-                    # Data consistency checks
-                    for boto_instance in boto_instances:
-                        # state_code is a 16-bit value where the high byte is
-                        # an opaque internal value and should be ignored.
-                        state_code = boto_instance.state_code & 255
-                        if not ((boto_instance.id in instance_ids[region]) or
-                                (state_code == INSTANCE_STATE['shutting-down'] or
-                                 state_code == INSTANCE_STATE['terminated'])):
-                            self.logger.error("Instance with EC2 ID %s (status %d) "
-                                              "is not in region list for region %s",
-                                              boto_instance.id, state_code, region)
+                self.logger.info("Pool Terminating %s instances in region %s",
+                                 len(instance_ids[region]), region)
+                boto_instances = cluster.find(instance_ids=instance_ids[region])
+                # Data consistency checks
+                for boto_instance in boto_instances:
+                    # state_code is a 16-bit value where the high byte is
+                    # an opaque internal value and should be ignored.
+                    state_code = boto_instance.state_code & 255
+                    if not ((boto_instance.id in instance_ids[region]) or
+                            (state_code == INSTANCE_STATE['shutting-down'] or
+                                state_code == INSTANCE_STATE['terminated'])):
+                        self.logger.error("Instance with EC2 ID %s (status %d) "
+                                          "is not in region list for region %s",
+                                          boto_instance.id, state_code, region)
 
                     cluster.terminate(boto_instances)
-                else:
-                    self.logger.info("Pool Terminating %s instances in region %s",
-                                     len(instance_ids[region]), region)
-                    cluster.terminate(cluster.find(instance_ids=instance_ids[region]))
             except (boto.exception.EC2ResponseError, boto.exception.BotoServerError, ssl.SSLError, socket.error) as msg:
                 self.logger.exception("terminate_pool_instances: boto failure: %s", msg)
-                return 1
+                return
 
     def start_instances(self, config, region, zone, userdata, ami, instance_type, count=1):
         images = self._create_laniakea_images(config)
@@ -213,13 +209,8 @@ class EC2SpotCloudProvider(CloudProvider):
             raise Exception({'type': 'temporary-failure', 'data': 'Temporary failure occured: %s' % msg})
 
     @staticmethod
-    def config_supported(config):
-        fields = ['ec2_allowed_regions', 'ec2_max_price', 'ec2_key_name', 'ec2_tags', 'ec2_security_groups',
-                  'ec2_instance_types', 'ec2_raw_config', 'ec2_image_name']
-        if any(key in config for key in fields):
-            return True
-        else:
-            return False
+    def get_cores_per_instance():
+        return CORES_PER_INSTANCE
 
     @staticmethod
     def get_allowed_regions(config):
@@ -246,8 +237,13 @@ class EC2SpotCloudProvider(CloudProvider):
         return 'EC2Spot'
 
     @staticmethod
-    def get_cores_per_instance():
-        return CORES_PER_INSTANCE
+    def config_supported(config):
+        fields = ['ec2_allowed_regions', 'ec2_max_price', 'ec2_key_name', 'ec2_tags', 'ec2_security_groups',
+                  'ec2_instance_types', 'ec2_raw_config', 'ec2_image_name']
+        if any(key in config for key in fields):
+            return True
+        else:
+            return False
 
     def get_price_per_region(self, region_name, instance_types=None):
         '''Gets spot prices of the specified region and instance type'''

@@ -42,12 +42,12 @@ class PoolConfiguration(models.Model):
     ec2_key_name = models.CharField(max_length=255, blank=True, null=True)
     ec2_tags = models.CharField(max_length=1023, blank=True, null=True)
     ec2_security_groups = models.CharField(max_length=255, blank=True, null=True)
-    ec2_instance_types = models.CharField(max_length=1023, blank=True, null=True)
+    ec2_instance_types = models.CharField(max_length=4095, blank=True, null=True)
     ec2_image_name = models.CharField(max_length=255, blank=True, null=True)
     ec2_raw_config = models.CharField(max_length=4095, blank=True, null=True)
 
     def __init__(self, *args, **kwargs):
-
+        # These variables can hold temporarily deserialized data
         self.ec2_tags_dict = None
         self.ec2_tags_override = None
         self.userdata_macros_dict = None
@@ -62,6 +62,14 @@ class PoolConfiguration(models.Model):
         self.ec2_instance_types_list = None
         self.ec2_instance_types_override = None
 
+        # This list is used to update the parent configuration with our own
+        # values and to check for missing fields in our flat config.
+        #
+        # All fields of our model except for the parent and name
+        # fields are inheritable and follow the precedence model.
+        #
+        # The fields which are dictionaries/lists get special treatment
+        # because they should behave in an additive manner.
         self.config_fields = [
             'size',
             'cycle_interval',
@@ -82,6 +90,11 @@ class PoolConfiguration(models.Model):
             'userdata_macros',
             'ec2_raw_config',
         ]
+
+        # For performance reasons we do not deserialize these fields
+        # automatically here. You need to explicitly call the
+        # deserializeFields method if you need this data.
+
         super(PoolConfiguration, self).__init__(*args, **kwargs)
 
     def flatten(self):

@@ -5,7 +5,6 @@ from django.conf import settings
 from django.db.models.query_utils import Q
 from django.utils import timezone
 from celeryconf import app
-from .Provider import Provider
 
 
 STATS_DELTA_SECS = 60 * 15  # 30 minutes
@@ -109,7 +108,7 @@ def check_instance_pools():
 def update_prices():
     from .models import PoolConfiguration
     from .common.prices import get_prices
-    from .CloudProvider.CloudProvider import PROVIDERS
+    from .CloudProvider.CloudProvider import PROVIDERS, CloudProvider
 
     """Periodically refresh spot price history and store it in redis to be consumed when spot instances are created.
 
@@ -118,28 +117,29 @@ def update_prices():
     and values as JSON objects {region: {az: [prices]}} like:
         '{"us-east-1": {"us-east-1a": [0.08000, ...]}}'
     """
+
     regions = set()
-    for cfg in PoolConfiguration.objects.all():
-        config = cfg.flatten()
-        for provider in PROVIDERS:
-            cloud_provider = Provider().getInstance(provider)
-            if not cloud_provider.config_supported(config):
-                continue
-            allowed_regions = cloud_provider.get_allowed_regions(config)
-
-            print(allowed_regions)
-
-            if allowed_regions:
-                regions |= set(allowed_regions)
-            prices = get_prices(regions, cloud_provider)
-            now = timezone.now()
-            expires = now + datetime.timedelta(hours=12)  # how long this data is valid (if not replaced)
-            # use pipeline() so everything is in 1 transaction
-            cache = redis.StrictRedis(host=settings.REDIS_HOST, port=settings.REDIS_PORT,
-                                      db=settings.REDIS_DB).pipeline()
-            for instance_type in prices:
-                key = provider + ':price:' + instance_type
-                cache.delete(key)
-                cache.set(key, json.dumps(prices[instance_type], separators=(',', ':')))
-                cache.expireat(key, expires)
-                cache.execute()  # commit to redis
+    for provider in PROVIDERS:
+        print('doing %s provider' % provider)
+        cloud_provider = CloudProvider.getInstance(provider)
+        for cfg in PoolConfiguration.objects.all():
+            config = cfg.flatten()
+            if cloud_provider.config_supported(config):
+                allowed_regions = cloud_provider.get_allowed_regions(config)
+                if allowed_regions:
+                    regions |= set(allowed_regions)
+                    print(regions)
+        prices = get_prices(regions, cloud_provider)
+        now = timezone.now()
+        expires = now + datetime.timedelta(hours=12)  # how long this data is valid (if not replaced)
+        # use pipeline() so everything is in 1 transaction per provider.
+        cache = redis.StrictRedis(host=settings.REDIS_HOST, port=settings.REDIS_PORT,
+                                  db=settings.REDIS_DB).pipeline()
+        for instance_type in prices:
+            key = provider + ':price:' + instance_type
+            print(key)
+            cache.delete(key)
+            cache.set(key, json.dumps(prices[instance_type], separators=(',', ':')))
+            cache.expireat(key, expires)
+        cache.execute()  # commit to redis
+        
