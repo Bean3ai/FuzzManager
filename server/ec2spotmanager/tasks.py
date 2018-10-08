@@ -322,7 +322,8 @@ def _update_pool_instances(pool, config):
             instances_left.append(instance)
 
     # set config to this pool for now in case we set tags on fulfilled spot requests
-    config.ec2_tags[SPOTMGR_TAG + '-PoolId'] = str(pool.pk)
+    tags = cloud_provider.get_tags(config)
+    tags[SPOTMGR_TAG + '-PoolId'] = str(pool.pk)
 
     for region in instance_ids_by_region:
         try:
@@ -333,9 +334,10 @@ def _update_pool_instances(pool, config):
                     requested.append(instance_id)
 
             if requested:
-                (successful_requests, failed_requests) = cloud_provider.check_instances_requests(region,
-                                                                                                 requested,
-                                                                                                 config.ec2_tags)
+                (successful_requests,
+                 failed_requests) = cloud_provider.check_instances_requests(region,
+                                                                            requested,
+                                                                            cloud_provider.get_tags())
                 for req_id in successful_requests.keys():
                     instance = instances_by_ids[req_id]
                     instance.hostname = successful_requests[req_id]['hostname']
@@ -354,14 +356,15 @@ def _update_pool_instances(pool, config):
                     if failed_requests[req_id]['action'] == 'blacklist':
                         # request was not fulfilled for some reason.. blacklist this type/zone for a while
                         inst = instances_by_ids[req_id]
-                        key = "EC2Spot:blacklist:%s:%s" % (inst.zone, failed_requests[req_id]['instance_type'])
+                        key = "%s:blacklist:%s:%s" % (cloud_provider.get_name(), inst.zone, failed_requests[req_id]['instance_type'])
                         cache.set(key, "", ex=12 * 3600)
                         logger.warning("Blacklisted %s for 12h", key)
                         inst.delete()
                     elif failed_requests[req_id]['action'] == 'disable_pool':
                         _update_pool_status(pool, {'type': 'unclassifed', 'data': 'request failed'})
-
-            cloud_instances = cloud_provider.check_instances_state(pool.pk, region)
+            
+            instances = _get_instance_ids_by_region(region)
+            cloud_instances = cloud_provider.check_instances_state(instances, region)
 
             for cloud_instance in cloud_instances.keys():
                 debug_cloud_instances_ids_seen.add(cloud_instance)
@@ -389,8 +392,8 @@ def _update_pool_instances(pool, config):
 
                         # As a last resort, try to find the instance in our database.
                         # If the instance was saved to our database between the entrance
-                        # to this function and the search query sent to EC2, then the instance
-                        # will not be in our instances list but returned by EC2. In this
+                        # to this function and the search query sent to provider, then the instance
+                        # will not be in our instances list but returned by provider. In this
                         # case, we try to load it directly from the database.
                         q = Instance.objects.filter(instance_id=cloud_instance)
                         if q:

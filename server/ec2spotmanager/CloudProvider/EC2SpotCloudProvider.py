@@ -176,23 +176,26 @@ class EC2SpotCloudProvider(CloudProvider):
 
         return (successful_requests, failed_requests)
 
-    def check_instances_state(self, pool_id, region):
-
+    def check_instances_state(self, instance_ids_by_region):
         instance_states = {}
-        cluster = EC2Manager(None)
-        try:
-            cluster.connect(region=region, aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-                            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY)
-        except Exception as msg:
-            raise Exception({'type': 'unclassified', 'data': msg})
+        for region in instance_ids_by_region:
+            cluster = EC2Manager(None)
+            try:
+                cluster.connect(region=region, aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+                                aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY)
+            except Exception as msg:
+                raise Exception({"type": "unclassified", "data": msg})
 
-        boto_instances = cluster.find(filters={"tag:" + SPOTMGR_TAG + "-PoolId": str(pool_id)})
+            try:
+                boto_instances = cluster.find(instance_ids=instance_ids_by_region[region])
+            except Exception as msg:
+                raise Exception({'type': 'unclassified', 'data': msg})
 
-        for instance in boto_instances:
-            if instance.state_code not in [INSTANCE_STATE['shutting-down'], INSTANCE_STATE['terminated']]:
-                instance_states[instance.id] = {}
-                instance_states[instance.id]['status'] = instance.state_code & 255
-                instance_states[instance.id]['tags'] = instance.tags
+            for instance in boto_instances:
+                if instance.state_code not in [INSTANCE_STATE['shutting-down'], INSTANCE_STATE['terminated']]:
+                    instance_states[instance.id] = {}
+                    instance_states[instance.id]['status'] = instance.state_code & 255
+                    instance_states[instance.id]['tags'] = instance.tags
 
         return instance_states
 
@@ -226,6 +229,10 @@ class EC2SpotCloudProvider(CloudProvider):
     @staticmethod
     def get_max_price(config):
         return config.ec2_max_price
+
+    @staticmethod
+    def get_tags(config):
+        return config.ec2_tags
 
     @staticmethod
     def uses_zones():
