@@ -190,6 +190,9 @@ class CloudProvider():
         Used to get provider specific instance_types
 
         @ptype config: FlatObject
+        @param config: pulling instance types from config
+
+        @ptype config: FlatObject
         @param config: cloug specific instance_types from config
 
         '''
@@ -202,10 +205,25 @@ class CloudProvider():
         Used to get provider specific max_price
 
         @ptype config: FlatObject
-        @param config: cloud specific max_price from config
+        @param config: pulling max_price from config
 
         @rtype max_price: float
         @return max_price cloud specific max_price
+
+        '''
+        return
+
+    @staticmethod
+    @abstractmethod
+    def get_tags(config):
+        '''
+        Used to get provider specific tags
+
+        @ptype config: FlatObject
+        @param config: pulling tags field
+
+        @rtype tags: dictionary
+        @return tags: cloud specific tags field
 
         '''
         return
@@ -225,7 +243,7 @@ class CloudProvider():
     @abstractmethod
     def get_name():
         '''
-        Used to return name of cloud provider. Used by Redis.
+        Used to return name of cloud provider. 
 
         @rtype name: string
         @return name: string representation of the cloud provider.
