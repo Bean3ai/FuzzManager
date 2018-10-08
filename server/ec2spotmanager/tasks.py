@@ -173,6 +173,8 @@ def _start_pool_instances(pool, config, count=1):
             image_key = PROVIDERS[0] + ":image:%s:%s" % (region, image_name)
             image = cache.get(image_key)
 
+            image = None
+
             if image is None:
                 image = cloud_provider.get_image(region, config)
                 cache.set(image_key, image, ex=24 * 3600)
@@ -337,7 +339,7 @@ def _update_pool_instances(pool, config):
                 (successful_requests,
                  failed_requests) = cloud_provider.check_instances_requests(region,
                                                                             requested,
-                                                                            cloud_provider.get_tags())
+                                                                            cloud_provider.get_tags(config))
                 for req_id in successful_requests.keys():
                     instance = instances_by_ids[req_id]
                     instance.hostname = successful_requests[req_id]['hostname']
@@ -362,9 +364,7 @@ def _update_pool_instances(pool, config):
                         inst.delete()
                     elif failed_requests[req_id]['action'] == 'disable_pool':
                         _update_pool_status(pool, {'type': 'unclassifed', 'data': 'request failed'})
-            
-            instances = _get_instance_ids_by_region(region)
-            cloud_instances = cloud_provider.check_instances_state(instances, region)
+            cloud_instances = cloud_provider.check_instances_state(pool.pk, region)
 
             for cloud_instance in cloud_instances.keys():
                 debug_cloud_instances_ids_seen.add(cloud_instance)

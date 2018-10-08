@@ -29,7 +29,7 @@ class EC2SpotCloudProvider(CloudProvider):
                 raise Exception({"type": "unclassified", "data": msg})
 
             try:
-                self.logger.info("Pool Terminating %s instances in region %s",
+                self.logger.info("Terminating %s instances in region %s",
                                  len(instance_ids_by_region[region]), region)
                 boto_instances = cluster.find(instance_ids=instance_ids_by_region[region])
                 # Data consistency checks
@@ -46,7 +46,7 @@ class EC2SpotCloudProvider(CloudProvider):
 
                     cluster.terminate(boto_instances)
             except (boto.exception.EC2ResponseError, boto.exception.BotoServerError, ssl.SSLError, socket.error) as msg:
-                self.logger.exception("terminate_pool_instances: boto failure: %s", msg)
+                self.logger.exception("terminate_instances: boto failure: %s", msg)
                 return
 
     def start_instances(self, config, region, zone, userdata, ami, instance_type, count=1):
@@ -86,11 +86,11 @@ class EC2SpotCloudProvider(CloudProvider):
                 images['default'].pop('image_name')
                 cluster.images = images
             except ssl.SSLError as msg:
-                self.logger.warning("start_pool_instances: Temporary failure in region %s: %s", region, msg)
+                self.logger.warning("start_instances: Temporary failure in region %s: %s", region, msg)
                 raise Exception({"type": "temporary-failure", "data": "Temporary failure occured: %s" % str(msg)})
 
             except Exception as msg:
-                self.logger.exception("start_pool_instances: laniakea failure: %s", msg)
+                self.logger.exception("start_instances: laniakea failure: %s", msg)
                 raise Exception({"type": "unclassified", "data": str(msg)})
 
             try:
@@ -107,19 +107,19 @@ class EC2SpotCloudProvider(CloudProvider):
 
             except (boto.exception.EC2ResponseError, boto.exception.BotoServerError, ssl.SSLError, socket.error) as msg:
                 if "MaxSpotInstanceCountExceeded" in str(msg):
-                    self.logger.warning("start_pool_instances: Maximum instance count exceeded for region %s",
+                    self.logger.warning("start_instances: Maximum instance count exceeded for region %s",
                                         region)
                     raise Exception({"type": "max-spot-instance-count-exceeded",
                                      "data": "Auto-selected region exceeded its maximum spot instance count."})
                 elif "Service Unavailable" in str(msg):
-                    self.logger.warning("start_pool_instances: Temporary failure in region %s: %s",
+                    self.logger.warning("start_instances: Temporary failure in region %s: %s",
                                         region, msg)
                     raise Exception({"type": "temporary-failure", "data": "Temporary failure occurred: %s" % str(msg)})
                 else:
-                    self.logger.exception("start_pool_instances: boto failure: %s", msg)
+                    self.logger.exception("start_instances: boto failure: %s", msg)
                     raise Exception({"type": "unclassified", "data": "Unclassified error occurred: %s" % str(msg)})
         except Exception as msg:
-            self.logger.exception("start_pool_instances: unhandled failure: %s", msg)
+            self.logger.exception("start_instances: unhandled failure: %s", msg)
             raise Exception({"type": "unclassified", "data": "Unclassified error occurred: %s" % str(msg)})
 
     def check_instances_requests(self, region, instances, tags):
@@ -176,36 +176,32 @@ class EC2SpotCloudProvider(CloudProvider):
 
         return (successful_requests, failed_requests)
 
-    def check_instances_state(self, instance_ids_by_region):
+    def check_instances_state(self, pool_id, region):
+    
         instance_states = {}
-        for region in instance_ids_by_region:
-            cluster = EC2Manager(None)
-            try:
-                cluster.connect(region=region, aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-                                aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY)
-            except Exception as msg:
-                raise Exception({"type": "unclassified", "data": msg})
-
-            try:
-                boto_instances = cluster.find(instance_ids=instance_ids_by_region[region])
-            except Exception as msg:
-                raise Exception({'type': 'unclassified', 'data': msg})
-
-            for instance in boto_instances:
-                if instance.state_code not in [INSTANCE_STATE['shutting-down'], INSTANCE_STATE['terminated']]:
-                    instance_states[instance.id] = {}
-                    instance_states[instance.id]['status'] = instance.state_code & 255
-                    instance_states[instance.id]['tags'] = instance.tags
-
-        return instance_states
-
-    def get_image(self, region, config):
-        images = self._create_laniakea_images(config)
         cluster = EC2Manager(None)
         try:
             cluster.connect(region=region, aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
                             aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY)
-            ami = cluster.resolve_image_name(images['default']['image_name'])
+        except Exception as msg:
+            raise Exception({'type': 'unclassified', 'data': msg})
+
+        boto_instances = cluster.find(filters={"tag:" + SPOTMGR_TAG + "-PoolId": str(pool_id)})
+
+        for instance in boto_instances:
+            if instance.state_code not in [INSTANCE_STATE['shutting-down'], INSTANCE_STATE['terminated']]:
+                instance_states[instance.id] = {}
+                instance_states[instance.id]['status'] = instance.state_code & 255
+                instance_states[instance.id]['tags'] = instance.tags
+
+        return instance_states
+
+    def get_image(self, region, config):
+        cluster = EC2Manager(None)
+        try:
+            cluster.connect(region=region, aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+                            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY)
+            ami = cluster.resolve_image_name(config.ec2_image_name)
             return ami
         except ssl.SSLError as msg:
             raise Exception({'type': 'temporary-failure', 'data': 'Temporary failure occured: %s' % msg})
