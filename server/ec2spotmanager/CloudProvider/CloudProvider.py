@@ -172,10 +172,10 @@ class CloudProvider():
     @abstractmethod
     def get_image_name(config):
         '''
-        Used to get provider specific image name from config.
+        Used to get provider specific image name from 
 
         @ptype config: FlatOboject
-        @param config: pulling image name from config
+        @param config: pulling image name from config 
 
         @rtype image_name: string
         @return image_name: cloud specific image name from config

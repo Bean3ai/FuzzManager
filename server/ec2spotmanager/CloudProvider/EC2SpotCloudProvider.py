@@ -18,9 +18,9 @@ class EC2SpotCloudProvider(CloudProvider):
     def __init__(self):
         self.logger = logging.getLogger("ec2spotmanager")
 
-    def terminate_instances(self, instance_ids_by_region):
+    def terminate_instances(self, instances_ids_by_region):
 
-        for region in instance_ids_by_region:
+        for region in instances_ids_by_region:
             cluster = EC2Manager(None)
             try:
                 cluster.connect(region=region, aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
@@ -30,16 +30,16 @@ class EC2SpotCloudProvider(CloudProvider):
 
             try:
                 self.logger.info("Terminating %s instances in region %s",
-                                 len(instance_ids_by_region[region]), region)
-                boto_instances = cluster.find(instance_ids=instance_ids_by_region[region])
+                                 len(instances_ids_by_region[region]), region)
+                boto_instances = cluster.find(instance_ids=instances_ids_by_region[region])
                 # Data consistency checks
                 for boto_instance in boto_instances:
                     # state_code is a 16-bit value where the high byte is
                     # an opaque internal value and should be ignored.
                     state_code = boto_instance.state_code & 255
-                    if not ((boto_instance.id in instance_ids_by_region[region]) or
+                    if not ((boto_instance.id in instances_ids_by_region[region]) or
                             (state_code == INSTANCE_STATE['shutting-down'] or
-                                state_code == INSTANCE_STATE['terminated'])):
+                             state_code == INSTANCE_STATE['terminated'])):
                         self.logger.error("Instance with EC2 ID %s (status %d) "
                                           "is not in region list for region %s",
                                           boto_instance.id, state_code, region)
@@ -49,7 +49,7 @@ class EC2SpotCloudProvider(CloudProvider):
                 self.logger.exception("terminate_instances: boto failure: %s", msg)
                 return
 
-    def start_instances(self, config, region, zone, userdata, ami, instance_type, count=1):
+    def start_instances(self, config, region, zone, userdata, image, instance_type, count=1):
         images = self._create_laniakea_images(config)
 
         # convert count from cores to instances
@@ -82,7 +82,7 @@ class EC2SpotCloudProvider(CloudProvider):
                 cluster.connect(region=region, aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
                                 aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY)
 
-                images['default']['image_id'] = ami
+                images['default']['image_id'] = image
                 images['default'].pop('image_name')
                 cluster.images = images
             except ssl.SSLError as msg:
@@ -242,10 +242,7 @@ class EC2SpotCloudProvider(CloudProvider):
     def config_supported(config):
         fields = ['ec2_allowed_regions', 'ec2_max_price', 'ec2_key_name', 'ec2_tags', 'ec2_security_groups',
                   'ec2_instance_types', 'ec2_raw_config', 'ec2_image_name']
-        if any(key in config for key in fields):
-            return True
-        else:
-            return False
+        return any(key in config for key in fields)
 
     def get_price_per_region(self, region_name, instance_types=None):
         '''Gets spot prices of the specified region and instance type'''
@@ -279,8 +276,9 @@ class EC2SpotCloudProvider(CloudProvider):
             raise RuntimeError("Boto connection error: %s" % (exc,))
 
         return prices
-
-    def _create_laniakea_images(self, config):
+    
+    @staticmethod
+    def _create_laniakea_images(config):
         images = {"default": {}}
 
         # These are the configuration keys we want to put into the target configuration

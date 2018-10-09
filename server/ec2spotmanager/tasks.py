@@ -4,8 +4,8 @@ import redis
 import fasteners
 from django.conf import settings
 from django.utils import timezone
-from celeryconf import app
 from laniakea.core.userdata import UserData
+from celeryconf import app
 from .CloudProvider.CloudProvider import INSTANCE_STATE, PROVIDERS, CloudProvider
 from . import cron  # noqa ensure cron tasks get registered
 
@@ -214,44 +214,44 @@ def _setup_userdata(config, pool):
 
 
 def _determine_best_location(config, regions, instance_types, cloud_provider, cores_per_instance):
-        from .common.prices import get_price_median
-        cache = redis.StrictRedis(host=settings.REDIS_HOST, port=settings.REDIS_PORT, db=settings.REDIS_DB)
+    from .common.prices import get_price_median
+    cache = redis.StrictRedis(host=settings.REDIS_HOST, port=settings.REDIS_PORT, db=settings.REDIS_DB)
 
-        rejected_prices = {}
-        best_zone = None
-        best_region = None
-        best_type = None
-        best_median = None
-        allowed_regions = set(regions)
-        for instance_type in instance_types:
-            data = cache.get('%s:price:%s' % (cloud_provider.get_name(), instance_type))
-            if data is None:
-                logger.warning("No price data for %s?", instance_type)
+    rejected_prices = {}
+    best_zone = None
+    best_region = None
+    best_type = None
+    best_median = None
+    allowed_regions = set(regions)
+    for instance_type in instance_types:
+        data = cache.get('%s:price:%s' % (cloud_provider.get_name(), instance_type))
+        if data is None:
+            logger.warning("No price data for %s?", instance_type)
+            continue
+        data = json.loads(data)
+        for region in data:
+            if region not in allowed_regions:
                 continue
-            data = json.loads(data)
-            for region in data:
-                if region not in allowed_regions:
-                    continue
-                if cloud_provider.uses_zones():
-                    for zone in data[region]:
-                        if cache.get("%s:blacklist:%s:%s" % (cloud_provider.get_name(),
-                                     zone, instance_type)) is not None:
-                            logger.debug("%s/%s/%s is blacklisted", cloud_provider.get_name(), zone, instance_type)
-                            continue
-                        out_prices = [price / cores_per_instance[instance_type] for
-                                      price in data[region][zone]]
-                        if out_prices[0] > cloud_provider.get_max_price(config):
-                            rejected_prices[zone] = min(rejected_prices.get(zone, 9999), out_prices[0])
-                            continue
-                        median = get_price_median(out_prices)
-                        if best_median is None or best_median > median:
-                            best_median = median
-                            best_zone = zone
-                            best_region = region
-                            best_type = instance_type
-                            logger.warning("Best price median currently %r in %s%s (%s)",
-                                           median, best_region, best_zone, best_type)
-            return(best_region, best_zone, best_type, rejected_prices)
+            if cloud_provider.uses_zones():
+                for zone in data[region]:
+                    if cache.get("%s:blacklist:%s:%s" % (cloud_provider.get_name(), zone,
+                                                         instance_type)) is not None:
+                        logger.debug("%s/%s/%s is blacklisted", cloud_provider.get_name(), zone, instance_type)
+                        continue
+                    out_prices = [price / cores_per_instance[instance_type] for
+                                  price in data[region][zone]]
+                    if out_prices[0] > cloud_provider.get_max_price(config):
+                        rejected_prices[zone] = min(rejected_prices.get(zone, 9999), out_prices[0])
+                        continue
+                    median = get_price_median(out_prices)
+                    if best_median is None or best_median > median:
+                        best_median = median
+                        best_zone = zone
+                        best_region = region
+                        best_type = instance_type
+                        logger.warning("Best price median currently %r in %s%s (%s)",
+                                       median, best_region, best_zone, best_type)
+        return(best_region, best_zone, best_type, rejected_prices)
 
 
 def _terminate_pool_instances(running_instances, instance_pool):
