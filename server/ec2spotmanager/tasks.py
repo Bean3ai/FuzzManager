@@ -73,7 +73,7 @@ def check_instance_pool(pool_id):
 
         if not instance_pool.isEnabled:
             if running_instances:
-                _terminate_pool_instances(instance_pool, running_instances, terminateByPool=True)
+                _terminate_pool_instances(running_instances, instance_pool)
                 logger.info("[Pool %d] Termination complete.", instance_pool.id)
             return
 
@@ -82,7 +82,7 @@ def check_instance_pool(pool_id):
             logger.info("[Pool %d] Needs to be cycled, terminating all instances...",
                         instance_pool.id)
             instance_pool.last_cycled = timezone.now()
-            _terminate_pool_instances(instance_pool, instances, terminateByPool=True)
+            _terminate_pool_instances(instances, instance_pool)
             instance_pool.save()
 
             logger.info("[Pool %d] Termination complete.", instance_pool.id)
@@ -254,16 +254,10 @@ def _determine_best_location(config, regions, instance_types, cloud_provider, co
             return(best_region, best_zone, best_type, rejected_prices)
 
 
-def _terminate_pool_instances(instance_pool, running_instances, terminateByPool=False):
+def _terminate_pool_instances(running_instances, instance_pool):
     """ Terminate an instance with the given configuration """
-    from .models import Instance
     cloud_provider = CloudProvider.getInstance(PROVIDERS[0])
-
-    if terminateByPool:
-        running_instances = Instance.objects.filter(pool=instance_pool)
-
     instance_ids = _get_instance_ids_by_region(running_instances)
-
     try:
         cloud_provider.terminate_instances(instance_ids)
     except Exception as msg:
@@ -358,7 +352,8 @@ def _update_pool_instances(pool, config):
                     if failed_requests[req_id]['action'] == 'blacklist':
                         # request was not fulfilled for some reason.. blacklist this type/zone for a while
                         inst = instances_by_ids[req_id]
-                        key = "%s:blacklist:%s:%s" % (cloud_provider.get_name(), inst.zone, failed_requests[req_id]['instance_type'])
+                        key = "%s:blacklist:%s:%s" % (cloud_provider.get_name(), inst.zone,
+                                                      failed_requests[req_id]['instance_type'])
                         cache.set(key, "", ex=12 * 3600)
                         logger.warning("Blacklisted %s for 12h", key)
                         inst.delete()

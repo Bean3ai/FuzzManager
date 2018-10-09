@@ -177,7 +177,7 @@ class EC2SpotCloudProvider(CloudProvider):
         return (successful_requests, failed_requests)
 
     def check_instances_state(self, pool_id, region):
-    
+
         instance_states = {}
         cluster = EC2Manager(None)
         try:

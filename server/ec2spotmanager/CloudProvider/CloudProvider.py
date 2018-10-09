@@ -84,10 +84,10 @@ class CloudProvider():
         we set the tags on the instance here.
 
         We create a dictionary of succesful requestions. This has hostname,
-        instance id, and status of the instance. This status must match the 
+        instance id, and status of the instance. This status must match the
         INSTANCE_STATE in CloudProvider.
 
-        Failed requests will have an action and instance type. Currently, we 
+        Failed requests will have an action and instance type. Currently, we
         support actions of 'blacklist' and disable_pool.
 
         @ptype region: string
@@ -118,7 +118,7 @@ class CloudProvider():
         @param region: region where instances are located
 
         @rtype instance_states: dictionary
-        @param running instances and their states. State must 
+        @param running instances and their states. State must
         comply with INSTANCE_STATE defined in CloudProvider
 
         '''
@@ -243,7 +243,7 @@ class CloudProvider():
     @abstractmethod
     def get_name():
         '''
-        Used to return name of cloud provider. 
+        Used to return name of cloud provider.
 
         @rtype name: string
         @return name: string representation of the cloud provider.
